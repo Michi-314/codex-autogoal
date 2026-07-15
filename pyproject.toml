@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-autogoal"
+version = "0.1.0"
+description = "External autonomous task supervisor for Codex CLI"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+  { name = "Michitaka Shoji" },
+]
+keywords = ["codex", "automation", "supervisor", "background-jobs"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Build Tools",
+  "Topic :: System :: Monitoring",
+]
+# 外部依存なし - Python標準ライブラリのみ
+
+[project.urls]
+Homepage = "https://github.com/Michi-314/codex-autogoal"
+Repository = "https://github.com/Michi-314/codex-autogoal.git"
+Issues = "https://github.com/Michi-314/codex-autogoal/issues"
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2",
+  "pytest>=8,<10",
+]
+
+[project.scripts]
+autogoal = "codex_autogoal.cli:main"
+"autogoal-job" = "codex_autogoal.job_cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

@@ -1,0 +1,20 @@
+# AutoGoal Hook設定テンプレート
+# このファイルの内容を ~/.codex/config.toml に追加してください。
+# `autogoal install` コマンドで自動追加されます。
+
+[[hooks.Stop]]
+
+[[hooks.Stop.hooks]]
+type = "command"
+command = "python3 /ABSOLUTE/PATH/TO/codex_autogoal/hooks/stop.py"
+timeout = 10
+statusMessage = "Processing AutoGoal state"
+
+[[hooks.PreToolUse]]
+matcher = "^Bash$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "python3 /ABSOLUTE/PATH/TO/codex_autogoal/hooks/pre_tool_use.py"
+timeout = 5
+statusMessage = "Checking AutoGoal command policy"
