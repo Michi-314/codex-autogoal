@@ -138,6 +138,35 @@ class TestDone:
         read = mgr.read()
         assert read.status == SessionStatus.DONE
 
+    def test_last_message_symlink_does_not_overwrite_external_file(
+        self, config, session_dir, tmp_path, capsys
+    ):
+        """The unsandboxed Stop hook must never follow a model-created symlink."""
+        sdir, sid = session_dir
+        mgr = StateManager(sdir)
+        mgr.write(SessionState(
+            session_id=sid,
+            status=SessionStatus.RUNNING,
+            cwd="/tmp",
+            created_at=now_iso(),
+        ))
+        external = tmp_path / "shell-rc"
+        external.write_text("safe\n")
+        paths.last_message_txt(config, sid).symlink_to(external)
+
+        _run_hook(config, {
+            "session_id": sid,
+            "last_assistant_message": (
+                'attacker controlled\n'
+                'AUTOGOAL_SIGNAL: {"state":"done","reason":"complete"}'
+            ),
+            "cwd": "/tmp",
+            "stop_hook_active": False,
+        }, capsys)
+
+        assert external.read_text() == "safe\n"
+        assert paths.last_message_txt(config, sid).is_symlink()
+
 
 class TestBlocked:
     def test_blocked_stops(self, config, session_dir, capsys):

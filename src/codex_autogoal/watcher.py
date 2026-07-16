@@ -6,7 +6,6 @@ import argparse
 import json
 import logging
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -116,7 +115,7 @@ def _watch_loop(
 
     while True:
         # キャンセル確認
-        if cancelled_path.exists():
+        if paths.is_private_regular_file(cancelled_path):
             logger.info("セッションがキャンセルされました。watcherを終了します。")
             return
 
@@ -137,7 +136,7 @@ def _watch_loop(
             return
 
         # ジョブ完了確認
-        if done_path.exists():
+        if paths.is_private_regular_file(done_path):
             logger.info(f"ジョブ {job_id} が完了しました。resumeを開始します。")
             _handle_job_done(config, session_id, job_id, logger)
             return
@@ -184,18 +183,22 @@ def _handle_job_done(
                        reason=f"CWDが存在しません: {cwd}")
         return
 
-    if state.resume_mode == "wezterm":
-        visible_message = _build_visible_resume_message(job_id, job_status)
-        success = _resume_visible(state, visible_message, mgr, logger)
-    else:
-        success = resume_session(
-            config=config,
-            session_id=session_id,
-            resume_message=resume_message,
-            cwd=cwd,
-            state_manager=mgr,
-            logger=logger,
+    if state.resume_mode != "headless":
+        logger.error("legacy visible resume state rejected; terminal injection is disabled")
+        mgr.transition(
+            state,
+            SessionStatus.BLOCKED_RESUME_FAILED,
+            reason="visible resume is disabled for security",
         )
+        return
+    success = resume_session(
+        config=config,
+        session_id=session_id,
+        resume_message=resume_message,
+        cwd=cwd,
+        state_manager=mgr,
+        logger=logger,
+    )
 
     if success:
         logger.info("resume成功")
@@ -203,110 +206,21 @@ def _handle_job_done(
         logger.error("resume失敗")
 
 
-def _resume_visible(
-    state: SessionState,
-    resume_message: str,
-    mgr: StateManager,
-    logger: logging.Logger,
-) -> bool:
-    """稼働中のWezTerm paneへメッセージとEnterを別送信する。"""
-    pane_id = state.terminal_pane_id
-    wezterm = shutil.which("wezterm")
-    if not pane_id or not wezterm:
-        logger.error("visible resumeに必要なWEZTERM_PANEまたはweztermがありません")
-        mgr.transition(
-            state,
-            SessionStatus.BLOCKED_RESUME_FAILED,
-            reason="visible resume target missing",
-        )
-        return False
-
-    if not _wezterm_pane_runs_codex(wezterm, pane_id):
-        logger.error("visible resume先がCodex foreground paneではありません")
-        mgr.transition(
-            state,
-            SessionStatus.BLOCKED_RESUME_FAILED,
-            reason="visible resume target is not Codex",
-        )
-        return False
-
-    base = [wezterm, "cli", "send-text", "--pane-id", pane_id, "--no-paste"]
-    try:
-        message_result = subprocess.run(
-            base,
-            input=resume_message,
-            text=True,
-            capture_output=True,
-            timeout=10,
-        )
-        if message_result.returncode != 0:
-            raise RuntimeError(message_result.stderr.strip() or "message send failed")
-        for attempt in range(2):
-            if not _wezterm_pane_runs_codex(wezterm, pane_id):
-                raise RuntimeError("visible resume target changed before Enter")
-            enter_result = subprocess.run(
-                base,
-                input="\r",
-                text=True,
-                capture_output=True,
-                timeout=10,
-            )
-            if enter_result.returncode != 0:
-                raise RuntimeError(enter_result.stderr.strip() or "enter send failed")
-            if attempt == 0:
-                time.sleep(0.35)
-    except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
-        logger.error(f"visible resume送信失敗: {exc}")
-        current = mgr.read()
-        if current:
-            mgr.transition(
-                current,
-                SessionStatus.BLOCKED_RESUME_FAILED,
-                reason=f"visible resume送信失敗: {exc}",
-            )
-        return False
-
-    current = mgr.read()
-    if current:
-        current.resume_count += 1
-        mgr.transition(current, SessionStatus.RUNNING, reason="visible resume送信成功")
-        mgr.append_event({
-            "type": "visible_resume_sent",
-            "pane_id": pane_id,
-            "timestamp": now_iso(),
-        })
-    logger.info(f"visible resume送信成功: pane={pane_id}")
-    return True
-
-
-def _wezterm_pane_runs_codex(wezterm: str, pane_id: str) -> bool:
-    """Fail closed unless WezTerm reports Codex as the pane foreground process."""
-    try:
-        result = subprocess.run(
-            [wezterm, "cli", "list", "--format", "json"],
-            text=True,
-            capture_output=True,
-            timeout=5,
-        )
-        if result.returncode != 0:
-            return False
-        panes = json.loads(result.stdout)
-        for pane in panes:
-            if str(pane.get("pane_id")) != str(pane_id):
-                continue
-            process = Path(str(pane.get("foreground_process_name", ""))).name.lower()
-            return process == "codex" or process.startswith("codex-")
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, TypeError):
-        return False
-    return False
-
-
 def _read_job_status(config: Config, job_id: str) -> dict:
     """ジョブの状態を読み取る"""
     try:
         status_path = paths.job_status_json(config, job_id)
-        return json.loads(status_path.read_text())
-    except (json.JSONDecodeError, FileNotFoundError):
+        data = json.loads(paths.read_private_text(status_path))
+        if not isinstance(data, dict):
+            raise ValueError("job status must be an object")
+        status = data.get("status")
+        exit_code = data.get("exit_code", -1)
+        if status not in {"SUCCEEDED", "FAILED"}:
+            raise ValueError("invalid job status")
+        if isinstance(exit_code, bool) or not isinstance(exit_code, int):
+            raise ValueError("invalid exit code")
+        return {"status": status, "exit_code": exit_code}
+    except (OSError, json.JSONDecodeError, ValueError):
         return {"status": "UNKNOWN", "exit_code": -1}
 
 
@@ -332,22 +246,6 @@ def _build_resume_message(config: Config, job_id: str, job_status: dict) -> str:
     )
 
 
-def _build_visible_resume_message(job_id: str, job_status: dict) -> str:
-    """Build a single-line, control-character-free visible resume message."""
-    paths.validate_identifier(job_id, kind="job ID")
-    status = str(job_status.get("status", "UNKNOWN")).upper()
-    if status not in {"SUCCEEDED", "FAILED", "UNKNOWN"}:
-        status = "UNKNOWN"
-    try:
-        exit_code = int(job_status.get("exit_code", -1))
-    except (TypeError, ValueError):
-        exit_code = -1
-    return (
-        f"AutoGoal job {job_id} completed with status {status} "
-        f"and exit code {exit_code}. Please inspect its logs and continue."
-    )
-
-
 def _setup_logger(session_dir: Path) -> logging.Logger:
     """watcher用ロガー"""
     logger = logging.getLogger("autogoal.watcher")
@@ -355,7 +253,9 @@ def _setup_logger(session_dir: Path) -> logging.Logger:
 
     if not logger.handlers:
         session_dir.mkdir(parents=True, exist_ok=True)
-        handler = logging.FileHandler(session_dir / "watcher.log", encoding="utf-8")
+        handler = logging.StreamHandler(
+            paths.open_private_append(session_dir / "watcher.log")
+        )
         handler.setFormatter(
             logging.Formatter("%(asctime)s [watcher] %(message)s")
         )

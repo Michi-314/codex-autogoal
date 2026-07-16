@@ -5,6 +5,11 @@
 > endorsed by OpenAI. AutoGoal can repeatedly invoke Codex CLI and run detached commands;
 > review its hooks, sandbox, prompts, and expected API usage before enabling it.
 
+> [!CAUTION]
+> v0.1.0 must not be used with untrusted content. A trust-boundary flaw allowed the
+> Codex-writable control home to influence unsandboxed hooks and watchers. The unreleased
+> security fix removes all Codex write access to control state and disables terminal resume.
+
 AutoGoal is a small, dependency-free supervisor for long-running Codex CLI tasks. It keeps
 ordinary work moving through a Stop hook, moves long commands into detached OS processes,
 and resumes the same Codex session once a job finishes. No model process remains alive while
@@ -101,10 +106,9 @@ autogoal-job logs JOB_ID --stderr
 autogoal-job cancel JOB_ID --kill
 ```
 
-Codex内で`CODEX_THREAD_ID`が存在する場合、`autogoal-job start/timer`はそのthreadへ
-自動接続する。WezTerm内ではpane IDも保存し、完了メッセージとEnter 2回を別送信して、表示中の
-対話を再開する。単独ジョブとして起動したい場合だけ`--no-attach`を付ける。明示的な
-接続には`--attach-current`または`--session-id SESSION_ID`を使う。
+`autogoal-job start/timer`は信頼済みの通常ターミナルからのみ実行する。Codex sandbox内
+からの起動は、control stateをモデル書込み可能にしないため拒否される。接続済みジョブの
+完了後はheadlessな`codex exec resume`だけを使用し、端末への文字列やEnter送信は行わない。
 
 durationは`30s`、`10m`、`2h`、`1d`に対応。通常ジョブは予測時刻ではなく対象プロセスの
 実終了を完了条件にする。終了コードが非0でもCodexはresumeされ、失敗ログを調査できる。
@@ -143,7 +147,7 @@ autogoal recover
 ## セキュリティ
 
 - 既定sandboxは`workspace-write`。`danger-full-access`を自動選択しない。
-- `autogoal start`は状態保存のため`CODEX_AUTOGOAL_HOME`だけを`--add-dir`で追加する。
+- `autogoal start`は`--add-dir`を使用せず、Codexにcontrol stateへの書込みを許可しない。
 - `shell=True`を使わずargv配列で起動する。
 - job IDを検証し、jobs root外やsymlink脱出を拒否する。
 - session IDも全CLI、Hook、watcher境界で検証する。
@@ -151,7 +155,8 @@ autogoal recover
 - PreToolUseは明白な長時間pollを止める補助ガードで、完全なsecurity boundaryではない。
 - `--kill-jobs`なしのsession cancelはジョブを殺さない。
 - `--bypass-hook-trust`は全configured hooksのtrust確認をその実行だけ迂回する。内容を監査済みの自動化でのみ使う。
-- WezTerm visible resumeは送信直前にもforeground processがCodexであることを確認し、確認不能なら安全停止する。
+- terminal keystrokeによるvisible resumeは無効。headless resumeだけを使用する。
+- protocolはパッケージ内のread-only定数で、runtime homeから読み込まない。
 
 ## Doctorとトラブルシューティング
 

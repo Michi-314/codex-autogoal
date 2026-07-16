@@ -70,9 +70,9 @@ def _run_hook() -> None:
         _emit_approve()
         return
 
-    # 正規のdetached runner内に長時間commandが含まれるのは許可する。
+    # The Codex sandbox must never write trusted AutoGoal control state.
     if re.search(r"(?:^|[/\s\"'])autogoal-job\s+(?:start|timer)\b", command):
-        _emit_approve()
+        _emit_reject("autogoal_job_from_sandbox")
         return
 
     # パターンチェック
@@ -102,11 +102,17 @@ def _emit_approve() -> None:
 
 def _emit_reject(reason: str) -> None:
     """コマンド実行を拒否する応答"""
+    message = _REJECT_MESSAGE
+    if reason == "autogoal_job_from_sandbox":
+        message = (
+            "AutoGoal control state is intentionally not writable from the Codex sandbox. "
+            "Return blocked and ask the user to start and attach the job from a trusted terminal."
+        )
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
-            "permissionDecisionReason": _REJECT_MESSAGE,
+            "permissionDecisionReason": message,
         }
     }, ensure_ascii=False), flush=True)
 

@@ -59,7 +59,6 @@ def run_codex_session(
     cmd = [
         config.codex_bin,
         "exec",
-        "--add-dir", str(config.home),
         "--sandbox", sandbox,
         "--json",
         "--",

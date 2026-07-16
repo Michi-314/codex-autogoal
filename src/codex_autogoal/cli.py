@@ -53,11 +53,10 @@ AUTOGOAL_SIGNAL: {"state":"blocked","reason":"..."}
 - 長時間かかる可能性のあるコマンドをフォアグラウンドで実行し続けてはならない。
 - sleep、watch、tail -f、ポーリングループを使って待機してはならない。
 - 同じ状態確認コマンドを繰り返してはならない。
-- 長時間処理は必ず`autogoal-job start -- <command>`で開始すること。
-- 時間経過のみを待つ場合は`autogoal-job timer --after <duration>`を使うこと。
-- ジョブ開始後、他に有益な作業がなければwaitを返すこと。
-- 処理時間の予測だけで再開時刻を決めず、原則として実際のプロセス終了を完了条件とすること。
-- ジョブが失敗終了した場合もwatcherが再開するため、自分で監視し続けてはならない。
+- sandbox内から`autogoal-job start/timer`を起動してはならない。
+- control stateはCodexへ書き込み許可されない。長時間ジョブが必要ならblockedを返し、
+  ユーザーが信頼済みターミナルから明示的に起動・接続するまで待つこと。
+- 処理時間の予測だけで再開時刻を決めてはならない。
 
 doneを返す前に以下を確認すること:
 
@@ -216,10 +215,9 @@ statusMessage = "Checking AutoGoal command policy"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(combined)
 
-    # プロトコルテンプレート保存
+    # Runtime state is control-plane data. Codex never receives write access
+    # to this directory, and the protocol remains an immutable package resource.
     paths.ensure_private_dir(config.home)
-    protocol_path = paths.protocol_file(config)
-    protocol_path.write_text(_DEFAULT_PROTOCOL)
 
     # ディレクトリ作成
     paths.ensure_private_dir(paths.state_dir(config))
@@ -227,7 +225,7 @@ statusMessage = "Checking AutoGoal command policy"
     paths.harden_runtime_permissions(config)
 
     print(f"✓ Hook設定を追加しました: {config_path}")
-    print(f"✓ プロトコルテンプレートを保存しました: {protocol_path}")
+    print("✓ プロトコルはパッケージ内read-only resourceを使用します")
     print(f"✓ 状態ディレクトリを作成しました: {config.home}")
     print()
     print("次のステップ:")
@@ -254,12 +252,8 @@ def _cmd_start(config: Config, args) -> None:
         print("エラー: --prompt または --prompt-file を指定してください", file=sys.stderr)
         sys.exit(1)
 
-    # プロトコルテンプレート読み込み
-    protocol_path = paths.protocol_file(config)
-    if protocol_path.exists():
-        protocol = protocol_path.read_text()
-    else:
-        protocol = _DEFAULT_PROTOCOL
+    # Never load prompt instructions from the model-adjacent runtime home.
+    protocol = _DEFAULT_PROTOCOL
 
     # プロンプト組み立て
     full_prompt = build_prompt(user_prompt, protocol)
@@ -409,7 +403,7 @@ def _cmd_logs(config: Config, args) -> None:
     else:
         log_path = paths.codex_jsonl(config, args.session_id)
 
-    if not log_path.exists():
+    if not paths.is_private_regular_file(log_path):
         print(f"エラー: ログが見つかりません: {log_path}", file=sys.stderr)
         sys.exit(1)
 
@@ -418,7 +412,7 @@ def _cmd_logs(config: Config, args) -> None:
         import subprocess
         subprocess.run(["tail", "-f", str(log_path)])
     else:
-        print(log_path.read_text(), end="")
+        print(paths.read_private_text(log_path, max_bytes=100 * 1024 * 1024), end="")
 
 
 # ============================================================
@@ -436,7 +430,7 @@ def _cmd_cancel(config: Config, args) -> None:
         sys.exit(1)
 
     # cancelledマーカー作成
-    paths.cancelled_marker(config, args.session_id).touch()
+    paths.touch_private(paths.cancelled_marker(config, args.session_id))
 
     # 状態更新
     if state.status not in TERMINAL_STATUSES:

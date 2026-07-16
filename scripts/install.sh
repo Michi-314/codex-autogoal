@@ -28,8 +28,11 @@ mkdir -p "$INSTALL_ROOT" "$BIN_DIR"
 echo "=== Codex AutoGoal インストール ==="
 echo "1. 専用venvを作成: $VENV"
 python3 -m venv "$VENV"
-"$VENV/bin/python" -m pip install --upgrade pip >/dev/null
 "$VENV/bin/python" -m pip install "$PROJECT_DIR" >/dev/null
+
+# Uninstall refuses recursive deletion without this exact ownership marker.
+printf '%s\n' 'codex-autogoal-managed-install-v1' > "$INSTALL_ROOT/.codex-autogoal-install-root"
+chmod 600 "$INSTALL_ROOT/.codex-autogoal-install-root"
 
 ln -sfn "$VENV/bin/autogoal" "$BIN_DIR/autogoal"
 ln -sfn "$VENV/bin/autogoal-job" "$BIN_DIR/autogoal-job"
