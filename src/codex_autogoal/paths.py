@@ -2,9 +2,55 @@
 
 from __future__ import annotations
 
+import os
+import re
 from pathlib import Path
 
 from codex_autogoal.config import Config
+
+
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
+def validate_identifier(value: str, *, kind: str = "identifier") -> str:
+    """Validate an identifier before it is used as a path component."""
+    if not isinstance(value, str) or not _IDENTIFIER_RE.fullmatch(value):
+        raise ValueError(f"不正な{kind}: {value!r}")
+    return value
+
+
+def secure_umask() -> None:
+    """Make newly-created runtime state private to the current user."""
+    os.umask(0o077)
+
+
+def ensure_private_dir(path: Path) -> Path:
+    if path.is_symlink():
+        raise ValueError(f"runtime directory must not be a symlink: {path}")
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.chmod(0o700)
+    return path
+
+
+def harden_runtime_permissions(config: Config) -> None:
+    """Harden existing runtime state without following symlinks."""
+    home = config.home
+    if home.is_symlink():
+        raise ValueError(f"runtime home must not be a symlink: {home}")
+    if not home.exists():
+        ensure_private_dir(home)
+    for root, dirs, files in os.walk(home, followlinks=False):
+        root_path = Path(root)
+        if not root_path.is_symlink():
+            root_path.chmod(0o700)
+        for name in dirs:
+            item = root_path / name
+            if not item.is_symlink():
+                item.chmod(0o700)
+        for name in files:
+            item = root_path / name
+            if not item.is_symlink():
+                item.chmod(0o600)
 
 
 def state_dir(config: Config) -> Path:
@@ -19,12 +65,26 @@ def jobs_dir(config: Config) -> Path:
 
 def session_dir(config: Config, session_id: str) -> Path:
     """特定セッションのディレクトリ"""
-    return state_dir(config) / session_id
+    return _safe_child(
+        state_dir(config),
+        validate_identifier(session_id, kind="session ID"),
+    )
 
 
 def job_dir(config: Config, job_id: str) -> Path:
     """特定ジョブのディレクトリ"""
-    return jobs_dir(config) / job_id
+    return _safe_child(
+        jobs_dir(config),
+        validate_identifier(job_id, kind="job ID"),
+    )
+
+
+def _safe_child(root: Path, identifier: str) -> Path:
+    resolved_root = root.resolve()
+    target = (root / identifier).resolve()
+    if target.parent != resolved_root:
+        raise ValueError(f"path escapes runtime root: {identifier!r}")
+    return target
 
 
 def config_file(config: Config) -> Path:
@@ -97,6 +157,10 @@ def job_pid_file(config: Config, job_id: str) -> Path:
     return job_dir(config, job_id) / "pid"
 
 
+def job_process_identity_json(config: Config, job_id: str) -> Path:
+    return job_dir(config, job_id) / "process-identity.json"
+
+
 def job_exit_code_file(config: Config, job_id: str) -> Path:
     return job_dir(config, job_id) / "exit_code"
 
@@ -134,6 +198,10 @@ def resolve_job_dir_safe(config: Config, job_id: str) -> Path | None:
     Returns:
         安全なジョブディレクトリパス。不正な場合はNone。
     """
+    try:
+        validate_identifier(job_id, kind="job ID")
+    except ValueError:
+        return None
     root = jobs_dir(config).resolve()
     target = (root / job_id).resolve()
     # パストラバーサル防止

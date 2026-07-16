@@ -20,6 +20,7 @@ from codex_autogoal.attachment import attach_job
 
 
 def main() -> None:
+    paths.secure_umask()
     parser = argparse.ArgumentParser(
         prog="autogoal-job",
         description="AutoGoal バックグラウンドジョブ管理",
@@ -60,17 +61,22 @@ def main() -> None:
 
     args = parser.parse_args()
     config = load_config()
+    paths.harden_runtime_permissions(config)
 
-    if args.command == "start":
-        _cmd_start(config, args)
-    elif args.command == "timer":
-        _cmd_timer(config, args)
-    elif args.command == "status":
-        _cmd_status(config, args)
-    elif args.command == "logs":
-        _cmd_logs(config, args)
-    elif args.command == "cancel":
-        _cmd_cancel(config, args)
+    try:
+        if args.command == "start":
+            _cmd_start(config, args)
+        elif args.command == "timer":
+            _cmd_timer(config, args)
+        elif args.command == "status":
+            _cmd_status(config, args)
+        elif args.command == "logs":
+            _cmd_logs(config, args)
+        elif args.command == "cancel":
+            _cmd_cancel(config, args)
+    except ValueError as exc:
+        print(f"エラー: {exc}", file=sys.stderr)
+        sys.exit(2)
 
 
 def _cmd_start(config, args) -> None:

@@ -72,6 +72,7 @@ def launch_watcher(
 
 def main() -> None:
     """Watcherメインエントリポイント（detachedプロセスとして実行される）"""
+    paths.secure_umask()
     parser = argparse.ArgumentParser()
     parser.add_argument("--session-id", required=True)
     parser.add_argument("--job-id", required=True)
@@ -79,8 +80,8 @@ def main() -> None:
     args = parser.parse_args()
 
     config = Config(home=Path(args.home))
-    session_id = args.session_id
-    job_id = args.job_id
+    session_id = paths.validate_identifier(args.session_id, kind="session ID")
+    job_id = paths.validate_identifier(args.job_id, kind="job ID")
 
     sdir = paths.session_dir(config, session_id)
     logger = _setup_logger(sdir)
@@ -183,7 +184,8 @@ def _handle_job_done(
         return
 
     if state.resume_mode == "wezterm":
-        success = _resume_visible(state, resume_message, mgr, logger)
+        visible_message = _build_visible_resume_message(job_id, job_status)
+        success = _resume_visible(state, visible_message, mgr, logger)
     else:
         success = resume_session(
             config=config,
@@ -218,6 +220,15 @@ def _resume_visible(
         )
         return False
 
+    if not _wezterm_pane_runs_codex(wezterm, pane_id):
+        logger.error("visible resume先がCodex foreground paneではありません")
+        mgr.transition(
+            state,
+            SessionStatus.BLOCKED_RESUME_FAILED,
+            reason="visible resume target is not Codex",
+        )
+        return False
+
     base = [wezterm, "cli", "send-text", "--pane-id", pane_id, "--no-paste"]
     try:
         message_result = subprocess.run(
@@ -230,6 +241,8 @@ def _resume_visible(
         if message_result.returncode != 0:
             raise RuntimeError(message_result.stderr.strip() or "message send failed")
         for attempt in range(2):
+            if not _wezterm_pane_runs_codex(wezterm, pane_id):
+                raise RuntimeError("visible resume target changed before Enter")
             enter_result = subprocess.run(
                 base,
                 input="\r",
@@ -265,6 +278,28 @@ def _resume_visible(
     return True
 
 
+def _wezterm_pane_runs_codex(wezterm: str, pane_id: str) -> bool:
+    """Fail closed unless WezTerm reports Codex as the pane foreground process."""
+    try:
+        result = subprocess.run(
+            [wezterm, "cli", "list", "--format", "json"],
+            text=True,
+            capture_output=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return False
+        panes = json.loads(result.stdout)
+        for pane in panes:
+            if str(pane.get("pane_id")) != str(pane_id):
+                continue
+            process = Path(str(pane.get("foreground_process_name", ""))).name.lower()
+            return process == "codex" or process.startswith("codex-")
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, TypeError):
+        return False
+    return False
+
+
 def _read_job_status(config: Config, job_id: str) -> dict:
     """ジョブの状態を読み取る"""
     try:
@@ -293,6 +328,22 @@ def _build_resume_message(config: Config, job_id: str, job_status: dict) -> str:
         "ログと生成物を確認してください。\n"
         "失敗している場合は原因を調査して修正し、元の目的が検証済みで達成されるまで作業を継続してください。\n"
         "長時間処理が再度必要ならautogoal-jobを使用してください。"
+    )
+
+
+def _build_visible_resume_message(job_id: str, job_status: dict) -> str:
+    """Build a single-line, control-character-free visible resume message."""
+    paths.validate_identifier(job_id, kind="job ID")
+    status = str(job_status.get("status", "UNKNOWN")).upper()
+    if status not in {"SUCCEEDED", "FAILED", "UNKNOWN"}:
+        status = "UNKNOWN"
+    try:
+        exit_code = int(job_status.get("exit_code", -1))
+    except (TypeError, ValueError):
+        exit_code = -1
+    return (
+        f"AutoGoal job {job_id} completed with status {status} "
+        f"and exit code {exit_code}. Please inspect its logs and continue."
     )
 
 

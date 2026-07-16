@@ -27,6 +27,10 @@ class Config:
         "CODEX_AUTOGOAL_MAX_RESUME_ATTEMPTS", "3"
     )))
 
+    max_job_log_bytes: int = field(default_factory=lambda: int(os.environ.get(
+        "CODEX_AUTOGOAL_MAX_JOB_LOG_BYTES", str(100 * 1024 * 1024)
+    )))
+
     codex_bin: str = field(default_factory=lambda: os.environ.get(
         "CODEX_AUTOGOAL_CODEX_BIN", "codex"
     ))
