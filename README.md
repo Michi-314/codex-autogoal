@@ -6,9 +6,9 @@
 > review its hooks, sandbox, prompts, and expected API usage before enabling it.
 
 > [!CAUTION]
-> v0.1.0 and v0.1.1 must not be used with untrusted content. Upgrade to v0.1.2, which
-> quarantines legacy control homes containing symlinks. AutoGoal remains an alpha for trusted
-> repositories: same-user Codex sandboxes can still read control logs on supported platforms.
+> v0.1.0 through v0.1.2 have unsafe legacy-migration paths. Upgrade to v0.1.3, which
+> quarantines control homes containing symlinks, special nodes, or hard-linked files. AutoGoal
+> remains an alpha for trusted repositories: same-user Codex can still read control logs.
 
 AutoGoal is a small, dependency-free supervisor for long-running Codex CLI tasks. It keeps
 ordinary work moving through a Stop hook, moves long commands into detached OS processes,
@@ -77,6 +77,7 @@ bash scripts/uninstall.sh
 ファイルは`0600`で保存される。起動前の再帰検査でsymlinkが1つでも見つかった旧control
 homeは、同じ親ディレクトリの`autogoal.quarantine-<timestamp>-<random>`へ丸ごと移動し、
 新しい空のcontrol homeを作る。隔離データは内容を確認してから手動で削除する。
+regular fileのhard link数も検査し、`st_nlink != 1`なら同様に隔離する。
 
 ## 基本操作
 
@@ -155,7 +156,7 @@ autogoal recover
 
 - 既定sandboxは`workspace-write`。`danger-full-access`を自動選択しない。
 - `autogoal start`は`--add-dir`を使用せず、Codexにcontrol stateへの書込みを許可しない。
-- control home内にsymlinkがあれば、個別再利用せずhome全体を隔離する。
+- control home内にsymlink、特殊ノード、複数hard linkがあればhome全体を隔離する。
 - `shell=True`を使わずargv配列で起動する。
 - job IDを検証し、jobs root外やsymlink脱出を拒否する。
 - session IDも全CLI、Hook、watcher境界で検証する。

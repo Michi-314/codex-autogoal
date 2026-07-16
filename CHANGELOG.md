@@ -7,6 +7,15 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-07-16
+
+### Security
+
+- Detect multiply-linked regular files during legacy control-home migration and quarantine the entire home.
+- Reject control-file reads, writes, appends, markers, and locks unless the inode has exactly one hard link.
+- Validate lock type, owner, mode, and link count before truncating or writing its PID.
+- Skip all control-home scanning and permission changes when the global Stop Hook is not enabled for a session.
+
 ## [0.1.2] - 2026-07-16
 
 ### Security
@@ -43,7 +52,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Path, job identifier, and symlink traversal guards.
 - Unit and fake-Codex integration tests.
 
-[Unreleased]: https://github.com/Michi-314/codex-autogoal/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/Michi-314/codex-autogoal/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/Michi-314/codex-autogoal/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/Michi-314/codex-autogoal/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Michi-314/codex-autogoal/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Michi-314/codex-autogoal/releases/tag/v0.1.0
