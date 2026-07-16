@@ -105,7 +105,7 @@ def _run_hook() -> None:
         mgr.write(state)
 
     # キャンセル確認
-    if paths.cancelled_marker(config, session_id).exists():
+    if paths.is_private_regular_file(paths.cancelled_marker(config, session_id)):
         logger.info("セッションがキャンセルされています")
         mgr.transition(state, SessionStatus.CANCELLED, reason="ユーザーキャンセル")
         _emit_stop()
@@ -113,7 +113,7 @@ def _run_hook() -> None:
 
     # 5. last_messageを保存
     try:
-        paths.last_message_txt(config, session_id).write_text(last_message)
+        paths.write_private_text(paths.last_message_txt(config, session_id), last_message)
     except OSError:
         pass
 
@@ -160,7 +160,7 @@ def _handle_continue(
 
     # ループ検出
     msg_hash = normalize_message_hash(
-        paths.last_message_txt(config, state.session_id).read_text()
+        paths.read_private_text(paths.last_message_txt(config, state.session_id))
         if paths.last_message_txt(config, state.session_id).exists()
         else ""
     )
@@ -252,7 +252,7 @@ def _handle_wait(
         return
 
     # すでにdoneなら即時続行可能
-    if paths.job_done_marker(config, signal.job_id).exists():
+    if paths.is_private_regular_file(paths.job_done_marker(config, signal.job_id)):
         logger.info(f"ジョブ {signal.job_id} はすでに完了しています。即時続行します。")
         # ジョブ結果を読んでcontinue
         _resume_with_job_result(config, state, signal.job_id, logger)
@@ -321,7 +321,7 @@ def _resume_with_job_result(
     status = None
     try:
         status_data = json.loads(
-            paths.job_status_json(config, job_id).read_text()
+            paths.read_private_text(paths.job_status_json(config, job_id))
         )
         status = status_data.get("status", "UNKNOWN")
         exit_code = status_data.get("exit_code", -1)
@@ -364,7 +364,7 @@ def _setup_logger(config: Config, session_id: str) -> logging.Logger:
     if not logger.handlers:
         log_path = paths.session_dir(config, session_id) / "hook.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        handler = logging.FileHandler(str(log_path), encoding="utf-8")
+        handler = logging.StreamHandler(paths.open_private_append(log_path))
         handler.setFormatter(
             logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
         )

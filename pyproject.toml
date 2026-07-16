@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=68,<82", "wheel>=0.41,<1"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-autogoal"
-version = "0.1.0"
+version = "0.1.1"
 description = "External autonomous task supervisor for Codex CLI"
 readme = "README.md"
 license = "MIT"

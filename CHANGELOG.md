@@ -7,11 +7,18 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-16
+
 ### Security
 
+- Remove `--add-dir` access to the AutoGoal control home, eliminating the model-to-hook trust-boundary reversal.
+- Disable WezTerm keystroke resume entirely and require headless resume.
+- Stop loading mutable protocol instructions from runtime state.
+- Use no-follow, owner/mode/type-checked I/O for trusted control files.
+- Refuse recursive uninstall unless a validated managed-install sentinel is present.
 - Reject invalid session and job identifiers at every filesystem boundary.
 - Store runtime state and logs with user-only permissions and migrate existing state.
-- Verify WezTerm foreground process before visible resume and send a sanitized one-line message.
+- Reject legacy visible-resume state instead of sending terminal input.
 - Verify process identity before killing a detached job and enforce a configurable job-log limit.
 - Pin CI actions by commit SHA and add CodeQL scanning.
 
@@ -26,5 +33,6 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Path, job identifier, and symlink traversal guards.
 - Unit and fake-Codex integration tests.
 
-[Unreleased]: https://github.com/Michi-314/codex-autogoal/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Michi-314/codex-autogoal/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Michi-314/codex-autogoal/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Michi-314/codex-autogoal/releases/tag/v0.1.0

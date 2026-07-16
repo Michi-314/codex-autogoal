@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 from pathlib import Path
+from typing import TextIO
 
 from codex_autogoal.config import Config
 
@@ -51,6 +53,93 @@ def harden_runtime_permissions(config: Config) -> None:
             item = root_path / name
             if not item.is_symlink():
                 item.chmod(0o600)
+
+
+def write_private_text(path: Path, content: str) -> None:
+    """Write a trusted control file without following a final-component symlink."""
+    ensure_private_dir(path.parent)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+    fd = os.open(path, flags, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        os.write(fd, content.encode("utf-8"))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def touch_private(path: Path) -> None:
+    """Create a private marker without following a symlink."""
+    ensure_private_dir(path.parent)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+    finally:
+        os.close(fd)
+
+
+def open_private_append(path: Path) -> TextIO:
+    """Open a private append-only control log without following symlinks."""
+    ensure_private_dir(path.parent)
+    fd = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW,
+        0o600,
+    )
+    os.fchmod(fd, 0o600)
+    return os.fdopen(fd, "a", encoding="utf-8")
+
+
+def open_private_write(path: Path) -> TextIO:
+    """Open a private truncated file without following symlinks."""
+    ensure_private_dir(path.parent)
+    fd = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+        0o600,
+    )
+    os.fchmod(fd, 0o600)
+    return os.fdopen(fd, "w", encoding="utf-8")
+
+
+def read_private_text(path: Path, *, max_bytes: int = 1_048_576) -> str:
+    """Read a trusted control file only if owner, mode, and type are safe."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError(f"control path is not a regular file: {path}")
+        if info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise PermissionError(f"unsafe control file ownership or mode: {path}")
+        if info.st_size > max_bytes:
+            raise ValueError(f"control file exceeds {max_bytes} bytes: {path}")
+        chunks: list[bytes] = []
+        remaining = max_bytes + 1
+        while remaining > 0:
+            chunk = os.read(fd, min(65_536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        data = b"".join(chunks)
+        if len(data) > max_bytes:
+            raise ValueError(f"control file exceeds {max_bytes} bytes: {path}")
+        return data.decode("utf-8")
+    finally:
+        os.close(fd)
+
+
+def is_private_regular_file(path: Path) -> bool:
+    """Check a marker without following symlinks."""
+    try:
+        info = path.lstat()
+    except OSError:
+        return False
+    return (
+        stat.S_ISREG(info.st_mode)
+        and info.st_uid == os.getuid()
+        and not info.st_mode & 0o077
+    )
 
 
 def state_dir(config: Config) -> Path:

@@ -63,7 +63,7 @@ def create_job(
     _atomic_write(paths.job_command_json(config, job_id), {"command": command})
 
     # started_at記録
-    paths.job_started_at_file(config, job_id).write_text(now)
+    paths.write_private_text(paths.job_started_at_file(config, job_id), now)
 
     # 初期status
     _atomic_write(paths.job_status_json(config, job_id), {
@@ -124,7 +124,7 @@ def create_timer_job(
     }
     _atomic_write(paths.job_metadata_json(config, job_id), metadata)
 
-    paths.job_started_at_file(config, job_id).write_text(now)
+    paths.write_private_text(paths.job_started_at_file(config, job_id), now)
 
     _atomic_write(paths.job_status_json(config, job_id), {
         "job_id": job_id,
@@ -169,11 +169,9 @@ def _launch_job_runner(
     err_path = paths.job_stderr_log(config, job_id)
 
     # ログファイル作成
-    log_path.touch()
-    err_path.touch()
-
     env = _detached_python_env()
-    with open(log_path, "w") as stdout_f, open(err_path, "w") as stderr_f:
+    with paths.open_private_write(log_path) as stdout_f, \
+         paths.open_private_write(err_path) as stderr_f:
         proc = subprocess.Popen(
             runner_cmd,
             stdin=subprocess.DEVNULL,
@@ -186,7 +184,7 @@ def _launch_job_runner(
         )
 
     # PID記録
-    paths.job_pid_file(config, job_id).write_text(str(proc.pid))
+    paths.write_private_text(paths.job_pid_file(config, job_id), str(proc.pid))
 
 
 def _launch_timer_runner(
@@ -205,11 +203,9 @@ def _launch_timer_runner(
 
     log_path = paths.job_stdout_log(config, job_id)
     err_path = paths.job_stderr_log(config, job_id)
-    log_path.touch()
-    err_path.touch()
-
     env = _detached_python_env()
-    with open(log_path, "w") as stdout_f, open(err_path, "w") as stderr_f:
+    with paths.open_private_write(log_path) as stdout_f, \
+         paths.open_private_write(err_path) as stderr_f:
         proc = subprocess.Popen(
             runner_cmd,
             stdin=subprocess.DEVNULL,
@@ -220,7 +216,7 @@ def _launch_timer_runner(
             env=env,
         )
 
-    paths.job_pid_file(config, job_id).write_text(str(proc.pid))
+    paths.write_private_text(paths.job_pid_file(config, job_id), str(proc.pid))
 
 
 def _detached_python_env() -> dict[str, str]:
@@ -276,7 +272,8 @@ def _run_command(config: Config, job_id: str, command: list[str], *, cwd: str | 
 
     exit_code = 1
     try:
-        with open(stdout_path, "w") as stdout_f, open(stderr_path, "w") as stderr_f:
+        with paths.open_private_write(stdout_path) as stdout_f, \
+             paths.open_private_write(stderr_path) as stderr_f:
             proc = subprocess.Popen(
                 command,
                 stdin=subprocess.DEVNULL,
@@ -286,7 +283,7 @@ def _run_command(config: Config, job_id: str, command: list[str], *, cwd: str | 
                 start_new_session=True,
             )
             # PID更新（実際の子プロセスPID）
-            paths.job_pid_file(config, job_id).write_text(str(proc.pid))
+            paths.write_private_text(paths.job_pid_file(config, job_id), str(proc.pid))
             try:
                 pgid = os.getpgid(proc.pid)
                 fingerprint = process_fingerprint(proc.pid)
@@ -308,7 +305,7 @@ def _run_command(config: Config, job_id: str, command: list[str], *, cwd: str | 
             )
     except Exception as e:
         # コマンド実行失敗
-        stderr_path.write_text(f"ジョブ実行エラー: {e}\n")
+        paths.write_private_text(stderr_path, f"ジョブ実行エラー: {e}\n")
         exit_code = 127
 
     _finalize_job(config, job_id, exit_code, command)
@@ -323,14 +320,17 @@ def _run_timer(config: Config, job_id: str, seconds: int) -> None:
     while elapsed < seconds:
         # キャンセル確認
         if paths.job_cancelled_marker(config, job_id).exists():
-            stdout_path.write_text(f"タイマーがキャンセルされました ({elapsed}/{seconds}秒)\n")
+            paths.write_private_text(
+                stdout_path,
+                f"タイマーがキャンセルされました ({elapsed}/{seconds}秒)\n",
+            )
             _finalize_job(config, job_id, 130, ["timer", str(seconds)])
             return
         sleep_time = min(1, seconds - elapsed)
         time.sleep(sleep_time)
         elapsed += sleep_time
 
-    stdout_path.write_text(f"タイマー完了: {seconds}秒\n")
+    paths.write_private_text(stdout_path, f"タイマー完了: {seconds}秒\n")
     _finalize_job(config, job_id, 0, ["timer", str(seconds)])
 
 
@@ -344,16 +344,18 @@ def _finalize_job(
     now = datetime.now(timezone.utc).isoformat()
 
     # 1. 終了コード
-    paths.job_exit_code_file(config, job_id).write_text(str(exit_code))
+    paths.write_private_text(paths.job_exit_code_file(config, job_id), str(exit_code))
 
     # 2. finished_at
-    paths.job_finished_at_file(config, job_id).write_text(now)
+    paths.write_private_text(paths.job_finished_at_file(config, job_id), now)
 
     # 3. status.json更新
     started_at = ""
     try:
-        started_at = paths.job_started_at_file(config, job_id).read_text().strip()
-    except FileNotFoundError:
+        started_at = paths.read_private_text(
+            paths.job_started_at_file(config, job_id)
+        ).strip()
+    except (OSError, ValueError):
         pass
 
     status = "SUCCEEDED" if exit_code == 0 else "FAILED"
@@ -378,17 +380,17 @@ def _finalize_job(
 def get_job_status(config: Config, job_id: str) -> dict | None:
     """ジョブの状態を取得する。"""
     status_path = paths.job_status_json(config, job_id)
-    if not status_path.exists():
+    if not paths.is_private_regular_file(status_path):
         return None
     try:
-        return json.loads(status_path.read_text())
-    except (json.JSONDecodeError, FileNotFoundError):
+        return json.loads(paths.read_private_text(status_path))
+    except (OSError, ValueError, json.JSONDecodeError):
         return None
 
 
 def is_job_done(config: Config, job_id: str) -> bool:
     """ジョブが完了しているか確認する。"""
-    return paths.job_done_marker(config, job_id).exists()
+    return paths.is_private_regular_file(paths.job_done_marker(config, job_id))
 
 
 def cancel_job(config: Config, job_id: str, *, kill: bool = False) -> bool:
@@ -405,13 +407,13 @@ def cancel_job(config: Config, job_id: str, *, kill: bool = False) -> bool:
         return False
 
     # cancelledマーカー作成
-    paths.job_cancelled_marker(config, job_id).touch()
+    paths.touch_private(paths.job_cancelled_marker(config, job_id))
 
     if kill:
         pid_path = paths.job_pid_file(config, job_id)
         if pid_path.exists():
             try:
-                pid = int(pid_path.read_text().strip())
+                pid = int(paths.read_private_text(pid_path).strip())
                 identity = _read_process_identity(config, job_id)
                 if not identity or identity.get("pid") != pid:
                     return False
@@ -443,11 +445,13 @@ def cancel_job(config: Config, job_id: str, *, kill: bool = False) -> bool:
 
 def _read_process_identity(config: Config, job_id: str) -> dict | None:
     try:
-        data = json.loads(paths.job_process_identity_json(config, job_id).read_text())
+        data = json.loads(paths.read_private_text(
+            paths.job_process_identity_json(config, job_id)
+        ))
         if not isinstance(data, dict) or not data.get("fingerprint"):
             return None
         return data
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError, json.JSONDecodeError):
         return None
 
 
@@ -472,7 +476,7 @@ def _wait_with_log_limit(
             except subprocess.TimeoutExpired:
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
                 proc.wait()
-            with open(stderr_path, "a", encoding="utf-8") as stream:
+            with paths.open_private_append(stderr_path) as stream:
                 stream.write(
                     f"\nAutoGoal log limit exceeded: {total} > {max_bytes} bytes\n"
                 )

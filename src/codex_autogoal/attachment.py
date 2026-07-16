@@ -43,8 +43,10 @@ def attach_job(
         raise ValueError(f"sessionはRUNNINGではありません: {state.status.value}")
 
     state.cwd = cwd or state.cwd or os.getcwd()
-    state.resume_mode = "wezterm" if pane_id else "headless"
-    state.terminal_pane_id = pane_id
+    # Terminal keystroke injection is not a safe resume transport. Keep these
+    # parameters for API compatibility but never persist or use them.
+    state.resume_mode = "headless"
+    state.terminal_pane_id = None
     mgr.write(state)
     if not mgr.transition(state, SessionStatus.WAITING, reason=reason, job_id=job_id):
         raise ValueError("WAITINGへの遷移に失敗しました")
@@ -52,7 +54,7 @@ def attach_job(
         "type": "job_attached",
         "job_id": job_id,
         "resume_mode": state.resume_mode,
-        "pane_id": pane_id,
+        "pane_id": None,
         "timestamp": now_iso(),
     })
 

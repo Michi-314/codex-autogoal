@@ -48,7 +48,7 @@ def resume_session(
             return False
 
         # キャンセル確認
-        if paths.cancelled_marker(config, session_id).exists():
+        if paths.is_private_regular_file(paths.cancelled_marker(config, session_id)):
             logger.info("セッションがキャンセルされました")
             state_manager.transition(state, SessionStatus.CANCELLED,
                                      reason="resume中にキャンセル")
@@ -101,7 +101,7 @@ def resume_session(
 
             # 待機中もキャンセル確認
             for _ in range(delay):
-                if paths.cancelled_marker(config, session_id).exists():
+                if paths.is_private_regular_file(paths.cancelled_marker(config, session_id)):
                     logger.info("待機中にキャンセルされました")
                     state = state_manager.read()
                     if state:

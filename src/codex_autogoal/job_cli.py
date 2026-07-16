@@ -150,16 +150,15 @@ def _maybe_attach(config, args, result: dict) -> None:
         raise ValueError("CODEX_THREAD_IDがありません")
     if not session_id:
         return
-    pane_id = os.environ.get("WEZTERM_PANE")
     watcher_pid = attach_job(
         config,
         session_id=session_id,
         job_id=result["job_id"],
         cwd=getattr(args, "cwd", None) or os.getcwd(),
-        pane_id=pane_id,
+        pane_id=None,
     )
     result["attached_session_id"] = session_id
-    result["resume_mode"] = "wezterm" if pane_id else "headless"
+    result["resume_mode"] = "headless"
     result["watcher_pid"] = watcher_pid
 
 
@@ -184,11 +183,14 @@ def _cmd_logs(config, args) -> None:
     else:
         log_path = paths.job_stdout_log(config, args.job_id)
 
-    if not log_path.exists():
+    if not paths.is_private_regular_file(log_path):
         print(f"エラー: ログファイルが見つかりません: {log_path}", file=sys.stderr)
         sys.exit(1)
 
-    content = log_path.read_text()
+    content = paths.read_private_text(
+        log_path,
+        max_bytes=config.max_job_log_bytes + 4096,
+    )
     if args.tail > 0:
         lines = content.splitlines()
         content = "\n".join(lines[-args.tail:])

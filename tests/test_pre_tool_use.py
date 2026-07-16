@@ -33,8 +33,11 @@ def test_long_sleep_uses_current_deny_shape(capsys):
     assert output["permissionDecision"] == "deny"
 
 
-def test_long_sleep_inside_autogoal_job_is_allowed(capsys):
-    assert _run("autogoal-job start -- sh -c 'sleep 300'", capsys) == {}
+def test_autogoal_job_from_codex_sandbox_is_denied(capsys):
+    result = _run("autogoal-job start -- sh -c 'sleep 300'", capsys)
+    output = result["hookSpecificOutput"]
+    assert output["permissionDecision"] == "deny"
+    assert "trusted terminal" in output["permissionDecisionReason"]
 
 
 def test_non_bash_is_noop(capsys):

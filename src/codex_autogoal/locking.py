@@ -40,7 +40,11 @@ class FileLock:
             ロック取得成功ならTrue
         """
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._fd = os.open(str(self.path), os.O_CREAT | os.O_RDWR, 0o644)
+        self._fd = os.open(
+            str(self.path),
+            os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
+            0o600,
+        )
 
         try:
             flags = fcntl.LOCK_EX
@@ -100,7 +104,8 @@ def is_lock_stale(lock_path: Path) -> bool:
         return False
 
     try:
-        pid_str = lock_path.read_text().strip()
+        from codex_autogoal import paths
+        pid_str = paths.read_private_text(lock_path).strip()
         if not pid_str:
             return True
         pid = int(pid_str)

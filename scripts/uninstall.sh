@@ -8,6 +8,30 @@ echo "=== Codex AutoGoal アンインストール ==="
 echo ""
 
 INSTALL_ROOT="${CODEX_AUTOGOAL_INSTALL_ROOT:-$HOME/.local/share/codex-autogoal}"
+INSTALL_ROOT_CANONICAL=$(python3 - "$INSTALL_ROOT" <<'PY'
+from pathlib import Path
+import sys
+print(Path(sys.argv[1]).expanduser().resolve())
+PY
+)
+HOME_CANONICAL=$(python3 - <<'PY'
+from pathlib import Path
+print(Path.home().resolve())
+PY
+)
+case "$INSTALL_ROOT_CANONICAL" in
+    /|"$HOME_CANONICAL"|"$HOME_CANONICAL/.local"|"$HOME_CANONICAL/.local/share")
+        echo "安全のため削除を拒否しました: $INSTALL_ROOT_CANONICAL" >&2
+        exit 1
+        ;;
+esac
+SENTINEL="$INSTALL_ROOT_CANONICAL/.codex-autogoal-install-root"
+if [ ! -f "$SENTINEL" ] || [ -L "$SENTINEL" ] || \
+   [ "$(cat "$SENTINEL")" != "codex-autogoal-managed-install-v1" ]; then
+    echo "管理対象sentinelを確認できないため削除を拒否しました: $INSTALL_ROOT_CANONICAL" >&2
+    exit 1
+fi
+INSTALL_ROOT="$INSTALL_ROOT_CANONICAL"
 for BIN_DIR in "${CODEX_AUTOGOAL_BIN_DIR:-}" "$HOME/.local/bin" /opt/homebrew/bin /usr/local/bin; do
     [ -n "$BIN_DIR" ] || continue
     for NAME in autogoal autogoal-job; do
@@ -62,7 +86,19 @@ echo ""
 
 # 専用venvを削除
 echo "2. 専用venvを削除..."
-rm -rf "$INSTALL_ROOT"
+python3 - "$INSTALL_ROOT" <<'PY'
+from pathlib import Path
+import shutil
+import sys
+
+root = Path(sys.argv[1])
+sentinel = root / ".codex-autogoal-install-root"
+if root.is_symlink() or sentinel.is_symlink() or not sentinel.is_file():
+    raise SystemExit("refusing unverified install root")
+if sentinel.read_text().strip() != "codex-autogoal-managed-install-v1":
+    raise SystemExit("refusing invalid install sentinel")
+shutil.rmtree(root)
+PY
 echo "   ✓ パッケージアンインストール完了"
 echo ""
 

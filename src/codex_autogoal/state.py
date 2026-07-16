@@ -12,6 +12,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from codex_autogoal import paths
+
 
 class SessionStatus(str, Enum):
     """セッション状態"""
@@ -191,9 +193,9 @@ class StateManager:
         if not self._status_path.exists():
             return None
         try:
-            data = json.loads(self._status_path.read_text(encoding="utf-8"))
+            data = json.loads(paths.read_private_text(self._status_path))
             return SessionState.from_dict(data)
-        except (json.JSONDecodeError, KeyError, ValueError):
+        except (OSError, json.JSONDecodeError, KeyError, ValueError):
             return None
 
     def write(self, state: SessionState) -> None:
@@ -231,7 +233,7 @@ class StateManager:
     def append_event(self, event: dict[str, Any]) -> None:
         """イベントをevents.jsonlに追記する。"""
         self.ensure_dir()
-        with open(self._events_path, "a", encoding="utf-8") as f:
+        with paths.open_private_append(self._events_path) as f:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
             f.flush()
 
