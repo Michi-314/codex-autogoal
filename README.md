@@ -6,9 +6,9 @@
 > review its hooks, sandbox, prompts, and expected API usage before enabling it.
 
 > [!CAUTION]
-> v0.1.0 must not be used with untrusted content. A trust-boundary flaw allowed the
-> Codex-writable control home to influence unsandboxed hooks and watchers. Upgrade to v0.1.1,
-> which removes all Codex write access to control state and disables terminal resume.
+> v0.1.0 and v0.1.1 must not be used with untrusted content. Upgrade to v0.1.2, which
+> quarantines legacy control homes containing symlinks. AutoGoal remains an alpha for trusted
+> repositories: same-user Codex sandboxes can still read control logs on supported platforms.
 
 AutoGoal is a small, dependency-free supervisor for long-running Codex CLI tasks. It keeps
 ordinary work moving through a Stop hook, moves long commands into detached OS processes,
@@ -73,9 +73,10 @@ bash scripts/install.sh
 bash scripts/uninstall.sh
 ```
 
-状態データ`~/.codex/autogoal/`は診断用に残る。
-状態ディレクトリは`0700`、状態・ログファイルは`0600`で保存される。旧バージョンで
-作成された状態も、次回の`autogoal`または`autogoal-job`実行時に同じ権限へ修正される。
+状態データ`~/.codex/autogoal/`は診断用に残る。状態ディレクトリは`0700`、状態・ログ
+ファイルは`0600`で保存される。起動前の再帰検査でsymlinkが1つでも見つかった旧control
+homeは、同じ親ディレクトリの`autogoal.quarantine-<timestamp>-<random>`へ丸ごと移動し、
+新しい空のcontrol homeを作る。隔離データは内容を確認してから手動で削除する。
 
 ## 基本操作
 
@@ -98,6 +99,7 @@ autogoal recover
 
 ```bash
 autogoal-job start --name backtest -- python3 scripts/run_backtest.py --days 30
+autogoal-job start --inherit-env --name trusted-job -- command-requiring-secrets
 autogoal-job timer --name cooldown --after 30m
 autogoal-job timer --at 2026-07-10T18:00:00+09:00
 autogoal-job status JOB_ID --json
@@ -109,6 +111,11 @@ autogoal-job cancel JOB_ID --kill
 `autogoal-job start/timer`は信頼済みの通常ターミナルからのみ実行する。Codex sandbox内
 からの起動は、control stateをモデル書込み可能にしないため拒否される。接続済みジョブの
 完了後はheadlessな`codex exec resume`だけを使用し、端末への文字列やEnter送信は行わない。
+
+detached jobはCodex sandbox外で通常ユーザー権限により実行される。既定では`PATH`、
+`HOME`、localeなどのallowlist環境だけを継承し、tokenやcloud credentialなどの任意環境変数
+は渡さない。全面継承が必要な監査済みコマンドだけ`--inherit-env`を明示する。この指定では
+通常ターミナルの秘密情報、filesystem権限、network権限を対象コマンドが利用できる。
 
 durationは`30s`、`10m`、`2h`、`1d`に対応。通常ジョブは予測時刻ではなく対象プロセスの
 実終了を完了条件にする。終了コードが非0でもCodexはresumeされ、失敗ログを調査できる。
@@ -148,6 +155,7 @@ autogoal recover
 
 - 既定sandboxは`workspace-write`。`danger-full-access`を自動選択しない。
 - `autogoal start`は`--add-dir`を使用せず、Codexにcontrol stateへの書込みを許可しない。
+- control home内にsymlinkがあれば、個別再利用せずhome全体を隔離する。
 - `shell=True`を使わずargv配列で起動する。
 - job IDを検証し、jobs root外やsymlink脱出を拒否する。
 - session IDも全CLI、Hook、watcher境界で検証する。
@@ -157,6 +165,16 @@ autogoal recover
 - `--bypass-hook-trust`は全configured hooksのtrust確認をその実行だけ迂回する。内容を監査済みの自動化でのみ使う。
 - terminal keystrokeによるvisible resumeは無効。headless resumeだけを使用する。
 - protocolはパッケージ内のread-only定数で、runtime homeから読み込まない。
+- Codex、watcher、detached jobの子環境はallowlistが既定。jobの全面継承は`--inherit-env`のみ。
+- resumeメッセージへcontrol homeの絶対パスや生のjob logを含めない。
+
+### 機密性の制約
+
+`0600`は別OSユーザーからの読み取りを防ぐが、CodexはAutoGoalと同じOSユーザーで動く。
+現行の対応Codex CLIにはAutoGoalから特定パスだけを確実にread-denyする公開オプションが
+ないため、`state/`と`jobs/`の生ログを同一ユーザーのCodexが読める可能性は残る。未信頼の
+README、Web内容、issue、ログを扱う用途では使用せず、必要なら専用OSユーザーまたは外部
+コンテナで分離する。ログには秘密情報を出力せず、不要になったcontrol dataは削除する。
 
 ## Doctorとトラブルシューティング
 

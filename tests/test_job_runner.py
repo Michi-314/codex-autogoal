@@ -52,6 +52,22 @@ class TestCreateJob:
         assert jdir.exists()
         assert paths.job_metadata_json(config, result["job_id"]).exists()
         assert paths.job_status_json(config, result["job_id"]).exists()
+        metadata = json.loads(paths.read_private_text(
+            paths.job_metadata_json(config, result["job_id"])
+        ))
+        assert metadata["environment"] == "allowlist"
+
+    def test_inherit_env_is_recorded_only_when_explicit(self, config):
+        result = create_job(
+            config,
+            ["echo", "hello"],
+            name="inherit-test",
+            inherit_env=True,
+        )
+        metadata = json.loads(paths.read_private_text(
+            paths.job_metadata_json(config, result["job_id"])
+        ))
+        assert metadata["environment"] == "inherited"
 
     def test_job_completes(self, config):
         """実際のコマンド（echo）が完了することを確認"""

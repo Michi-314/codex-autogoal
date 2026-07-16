@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import re
 import stat
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TextIO
 
@@ -34,34 +36,64 @@ def ensure_private_dir(path: Path) -> Path:
     return path
 
 
-def harden_runtime_permissions(config: Config) -> None:
-    """Harden existing runtime state without following symlinks."""
+def harden_runtime_permissions(config: Config) -> Path | None:
+    """Harden runtime state, quarantining the entire legacy home on any symlink."""
     home = config.home
-    if home.is_symlink():
-        raise ValueError(f"runtime home must not be a symlink: {home}")
-    if not home.exists():
-        ensure_private_dir(home)
+    quarantine = None
+    if home.is_symlink() or (home.exists() and _runtime_tree_contains_unsafe_node(home)):
+        quarantine = _quarantine_runtime_home(home)
+    ensure_private_dir(home)
     for root, dirs, files in os.walk(home, followlinks=False):
         root_path = Path(root)
-        if not root_path.is_symlink():
-            root_path.chmod(0o700)
+        root_path.chmod(0o700)
         for name in dirs:
             item = root_path / name
-            if not item.is_symlink():
-                item.chmod(0o700)
+            item.chmod(0o700)
         for name in files:
             item = root_path / name
-            if not item.is_symlink():
-                item.chmod(0o600)
+            item.chmod(0o600)
+    return quarantine
+
+
+def _runtime_tree_contains_unsafe_node(home: Path) -> bool:
+    """Reject links and special nodes without following anything in the runtime tree."""
+    for root, dirs, files in os.walk(home, topdown=True, followlinks=False):
+        root_path = Path(root)
+        for name in dirs:
+            try:
+                if not stat.S_ISDIR((root_path / name).lstat().st_mode):
+                    return True
+            except FileNotFoundError:
+                continue
+        for name in files:
+            try:
+                if not stat.S_ISREG((root_path / name).lstat().st_mode):
+                    return True
+            except FileNotFoundError:
+                continue
+    return False
+
+
+def _quarantine_runtime_home(home: Path) -> Path:
+    """Atomically move an unsafe legacy home aside and create an empty replacement."""
+    home.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    quarantine = home.with_name(
+        f"{home.name}.quarantine-{stamp}-{uuid.uuid4().hex[:8]}"
+    )
+    home.rename(quarantine)
+    ensure_private_dir(home)
+    return quarantine
 
 
 def write_private_text(path: Path, content: str) -> None:
     """Write a trusted control file without following a final-component symlink."""
     ensure_private_dir(path.parent)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+    flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK
     fd = os.open(path, flags, 0o600)
     try:
-        os.fchmod(fd, 0o600)
+        _validate_private_write_fd(fd, path)
+        os.ftruncate(fd, 0)
         os.write(fd, content.encode("utf-8"))
         os.fsync(fd)
     finally:
@@ -71,9 +103,13 @@ def write_private_text(path: Path, content: str) -> None:
 def touch_private(path: Path) -> None:
     """Create a private marker without following a symlink."""
     ensure_private_dir(path.parent)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    fd = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+        0o600,
+    )
     try:
-        os.fchmod(fd, 0o600)
+        _validate_private_write_fd(fd, path)
     finally:
         os.close(fd)
 
@@ -83,10 +119,14 @@ def open_private_append(path: Path) -> TextIO:
     ensure_private_dir(path.parent)
     fd = os.open(
         path,
-        os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW,
+        os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK,
         0o600,
     )
-    os.fchmod(fd, 0o600)
+    try:
+        _validate_private_write_fd(fd, path)
+    except Exception:
+        os.close(fd)
+        raise
     return os.fdopen(fd, "a", encoding="utf-8")
 
 
@@ -95,11 +135,25 @@ def open_private_write(path: Path) -> TextIO:
     ensure_private_dir(path.parent)
     fd = os.open(
         path,
-        os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+        os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
         0o600,
     )
-    os.fchmod(fd, 0o600)
+    try:
+        _validate_private_write_fd(fd, path)
+        os.ftruncate(fd, 0)
+    except Exception:
+        os.close(fd)
+        raise
     return os.fdopen(fd, "w", encoding="utf-8")
+
+
+def _validate_private_write_fd(fd: int, path: Path) -> None:
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError(f"control path is not a regular file: {path}")
+    if info.st_uid != os.getuid():
+        raise PermissionError(f"control file is not owned by current user: {path}")
+    os.fchmod(fd, 0o600)
 
 
 def read_private_text(path: Path, *, max_bytes: int = 1_048_576) -> str:

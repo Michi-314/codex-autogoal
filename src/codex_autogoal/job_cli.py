@@ -32,6 +32,11 @@ def main() -> None:
     p_start.add_argument("--name", help="ジョブ名")
     p_start.add_argument("--json", dest="output_json", action="store_true", help="JSON出力")
     p_start.add_argument("--cwd", help="作業ディレクトリ")
+    p_start.add_argument(
+        "--inherit-env",
+        action="store_true",
+        help="通常ターミナルの全環境変数を対象ジョブへ継承する（危険）",
+    )
     _add_attachment_arguments(p_start)
     p_start.add_argument("command_args", nargs=argparse.REMAINDER, help="実行コマンド (-- の後)")
 
@@ -61,7 +66,12 @@ def main() -> None:
 
     args = parser.parse_args()
     config = load_config()
-    paths.harden_runtime_permissions(config)
+    quarantine = paths.harden_runtime_permissions(config)
+    if quarantine:
+        print(
+            f"警告: symlinkを含む旧control homeを隔離しました: {quarantine}",
+            file=sys.stderr,
+        )
 
     try:
         if args.command == "start":
@@ -90,7 +100,13 @@ def _cmd_start(config, args) -> None:
         print("エラー: 実行コマンドを指定してください (-- の後)", file=sys.stderr)
         sys.exit(1)
 
-    result = create_job(config, cmd_args, name=args.name, cwd=args.cwd)
+    result = create_job(
+        config,
+        cmd_args,
+        name=args.name,
+        cwd=args.cwd,
+        inherit_env=args.inherit_env,
+    )
     _maybe_attach(config, args, result)
 
     if args.output_json:

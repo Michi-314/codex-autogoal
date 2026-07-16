@@ -15,7 +15,7 @@ from pathlib import Path
 from codex_autogoal.config import Config, load_config
 from codex_autogoal import paths
 from codex_autogoal.duration import parse_duration
-from codex_autogoal.process import process_fingerprint
+from codex_autogoal.process import process_fingerprint, sanitized_environment
 
 
 def generate_job_id(name: str | None = None) -> str:
@@ -35,6 +35,7 @@ def create_job(
     *,
     name: str | None = None,
     cwd: str | None = None,
+    inherit_env: bool = False,
 ) -> dict:
     """バックグラウンドジョブを作成し、detachedプロセスとして起動する。
 
@@ -58,6 +59,7 @@ def create_job(
         "cwd": cwd or os.getcwd(),
         "created_at": now,
         "type": "command",
+        "environment": "inherited" if inherit_env else "allowlist",
     }
     _atomic_write(paths.job_metadata_json(config, job_id), metadata)
     _atomic_write(paths.job_command_json(config, job_id), {"command": command})
@@ -74,7 +76,13 @@ def create_job(
     })
 
     # job runnerをdetachで起動
-    _launch_job_runner(config, job_id, command, cwd=cwd)
+    _launch_job_runner(
+        config,
+        job_id,
+        command,
+        cwd=cwd,
+        inherit_env=inherit_env,
+    )
 
     return {
         "job_id": job_id,
@@ -151,6 +159,7 @@ def _launch_job_runner(
     command: list[str],
     *,
     cwd: str | None = None,
+    inherit_env: bool = False,
 ) -> None:
     """job runnerプロセスをdetachで起動する。"""
     runner_cmd = [
@@ -169,7 +178,7 @@ def _launch_job_runner(
     err_path = paths.job_stderr_log(config, job_id)
 
     # ログファイル作成
-    env = _detached_python_env()
+    env = _detached_python_env(inherit_env=inherit_env)
     with paths.open_private_write(log_path) as stdout_f, \
          paths.open_private_write(err_path) as stderr_f:
         proc = subprocess.Popen(
@@ -219,9 +228,9 @@ def _launch_timer_runner(
     paths.write_private_text(paths.job_pid_file(config, job_id), str(proc.pid))
 
 
-def _detached_python_env() -> dict[str, str]:
+def _detached_python_env(*, inherit_env: bool = False) -> dict[str, str]:
     """Keep the package importable for detached source/editable runs."""
-    env = os.environ.copy()
+    env = sanitized_environment(inherit=inherit_env)
     src_root = str(Path(__file__).resolve().parents[1])
     current = env.get("PYTHONPATH")
     env["PYTHONPATH"] = os.pathsep.join(
@@ -257,6 +266,7 @@ def run_job_runner_main() -> None:
     command_args = args.command_args + remaining
 
     config = Config(home=Path(args.home))
+    paths.harden_runtime_permissions(config)
     job_id = paths.validate_identifier(args.job_id, kind="job ID")
 
     if args.mode == "timer":

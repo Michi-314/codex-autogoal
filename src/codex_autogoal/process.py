@@ -10,6 +10,23 @@ from pathlib import Path
 from typing import IO
 
 
+_SAFE_ENV_NAMES = frozenset({
+    "CODEX_HOME", "HOME", "LANG", "LOGNAME", "PATH", "PATHEXT", "SHELL",
+    "SYSTEMROOT", "TEMP", "TERM", "TMP", "TMPDIR", "USER", "VIRTUAL_ENV",
+})
+
+
+def sanitized_environment(*, inherit: bool = False) -> dict[str, str]:
+    """Return a minimal child environment unless full inheritance is explicit."""
+    if inherit:
+        return os.environ.copy()
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key in _SAFE_ENV_NAMES or key.startswith("LC_")
+    }
+
+
 def spawn_detached(
     command: list[str],
     *,
@@ -30,7 +47,7 @@ def spawn_detached(
     Returns:
         起動されたPopen オブジェクト
     """
-    merged_env = os.environ.copy()
+    merged_env = sanitized_environment()
     if env:
         merged_env.update(env)
 

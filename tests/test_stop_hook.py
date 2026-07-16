@@ -165,7 +165,10 @@ class TestDone:
         }, capsys)
 
         assert external.read_text() == "safe\n"
-        assert paths.last_message_txt(config, sid).is_symlink()
+        assert not paths.last_message_txt(config, sid).is_symlink()
+        quarantines = list(config.home.parent.glob("autogoal.quarantine-*"))
+        assert len(quarantines) == 1
+        assert (quarantines[0] / "state" / sid / "last-message.txt").is_symlink()
 
 
 class TestBlocked:
