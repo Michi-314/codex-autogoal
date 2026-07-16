@@ -51,6 +51,7 @@ def main() -> None:
 def _run_hook() -> None:
     """Hook処理本体"""
     config = load_config()
+    paths.harden_runtime_permissions(config)
 
     # 1. CODEX_AUTOGOAL_ENABLED確認
     if not config.enabled:

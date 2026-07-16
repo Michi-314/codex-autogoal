@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import subprocess
 import sys
 import time
@@ -12,6 +11,7 @@ from pathlib import Path
 
 from codex_autogoal.config import Config
 from codex_autogoal import paths
+from codex_autogoal.process import sanitized_environment
 from codex_autogoal.state import (
     SessionState,
     SessionStatus,
@@ -148,7 +148,7 @@ def _execute_resume(
     codex_log_path = paths.codex_jsonl(config, session_id)
     resume_log_path = paths.resume_log(config, session_id)
 
-    env = os.environ.copy()
+    env = sanitized_environment()
     env["CODEX_AUTOGOAL_ENABLED"] = "1"
     env["CODEX_AUTOGOAL_HOME"] = str(config.home)
 
@@ -167,8 +167,8 @@ def _execute_resume(
         )
 
         # JSONLストリーム処理
-        with open(codex_log_path, "a") as codex_log, \
-             open(resume_log_path, "a") as rlog:
+        with paths.open_private_append(codex_log_path) as codex_log, \
+             paths.open_private_append(resume_log_path) as rlog:
 
             rlog.write(f"\n--- resume開始: {now_iso()} ---\n")
 

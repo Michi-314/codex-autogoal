@@ -12,6 +12,7 @@ from pathlib import Path
 
 from codex_autogoal.config import Config
 from codex_autogoal import paths
+from codex_autogoal.process import sanitized_environment
 from codex_autogoal.state import (
     SessionState,
     SessionStatus,
@@ -74,7 +75,7 @@ def run_codex_session(
         cmd.insert(2, "--cd")
         cmd.insert(3, cwd)
 
-    env = os.environ.copy()
+    env = sanitized_environment()
     env["CODEX_AUTOGOAL_ENABLED"] = "1"
     env["CODEX_AUTOGOAL_HOME"] = str(config.home)
     if bypass_hook_trust:
@@ -145,13 +146,13 @@ def run_codex_session(
                             buf_f.flush()
                             # バッファの内容をコピー
                             with open(temp_log, "r") as src:
-                                with open(codex_log, "w") as dst:
+                                with paths.open_private_write(codex_log) as dst:
                                     dst.write(src.read())
 
                     # 正式ログに書き込み
                     if session_id:
                         codex_log_path = paths.codex_jsonl(config, session_id)
-                        with open(codex_log_path, "a") as log_f:
+                        with paths.open_private_append(codex_log_path) as log_f:
                             log_f.write(line + "\n")
                     else:
                         buf_f.write(line + "\n")

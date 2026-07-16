@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import stat
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -11,6 +12,7 @@ from codex_autogoal.config import Config
 from codex_autogoal.runner import run_codex_session
 from codex_autogoal import cli
 from codex_autogoal.watcher import _read_job_status
+from codex_autogoal.process import sanitized_environment
 
 
 @pytest.mark.parametrize("value", ["../escape", "a/b", "", ".", "x" * 129])
@@ -36,6 +38,71 @@ def test_harden_runtime_permissions(tmp_path):
     assert stat.S_IMODE(config.home.stat().st_mode) == 0o700
     assert stat.S_IMODE(nested.stat().st_mode) == 0o700
     assert stat.S_IMODE(log.stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize("linked_component", ["state", "jobs"])
+def test_harden_quarantines_home_when_control_root_is_symlink(
+    tmp_path, linked_component
+):
+    config = Config(home=tmp_path / "home")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    config.home.mkdir()
+    (config.home / linked_component).symlink_to(outside, target_is_directory=True)
+
+    quarantine = paths.harden_runtime_permissions(config)
+
+    assert quarantine is not None
+    assert quarantine.parent == config.home.parent
+    assert (quarantine / linked_component).is_symlink()
+    assert config.home.is_dir()
+    assert not config.home.is_symlink()
+    assert list(config.home.iterdir()) == []
+
+
+def test_harden_quarantines_symlinked_runtime_home(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    config = Config(home=tmp_path / "home")
+    config.home.symlink_to(outside, target_is_directory=True)
+
+    quarantine = paths.harden_runtime_permissions(config)
+
+    assert quarantine is not None and quarantine.is_symlink()
+    assert config.home.is_dir() and not config.home.is_symlink()
+    assert list(outside.iterdir()) == []
+
+
+def test_harden_quarantines_special_control_node(tmp_path):
+    config = Config(home=tmp_path / "home")
+    session = config.home / "state" / "session"
+    session.mkdir(parents=True)
+    os.mkfifo(session / "codex.jsonl")
+
+    quarantine = paths.harden_runtime_permissions(config)
+
+    assert quarantine is not None
+    assert stat.S_ISFIFO((quarantine / "state/session/codex.jsonl").lstat().st_mode)
+    assert config.home.is_dir()
+
+
+def test_sanitized_environment_drops_secrets(monkeypatch):
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setenv("LANG", "C.UTF-8")
+    monkeypatch.setenv("GH_TOKEN", "secret")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret")
+
+    env = sanitized_environment()
+
+    assert env["PATH"] == "/usr/bin"
+    assert env["LANG"] == "C.UTF-8"
+    assert "GH_TOKEN" not in env
+    assert "AWS_SECRET_ACCESS_KEY" not in env
+
+
+def test_sanitized_environment_can_explicitly_inherit(monkeypatch):
+    monkeypatch.setenv("CUSTOM_SECRET", "allowed-only-by-opt-in")
+    assert sanitized_environment(inherit=True)["CUSTOM_SECRET"] == "allowed-only-by-opt-in"
 
 
 def test_existing_identifier_symlink_cannot_escape_root(tmp_path):

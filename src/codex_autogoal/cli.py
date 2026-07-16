@@ -125,7 +125,12 @@ def main() -> None:
 
     args = parser.parse_args()
     config = load_config()
-    paths.harden_runtime_permissions(config)
+    quarantine = paths.harden_runtime_permissions(config)
+    if quarantine:
+        print(
+            f"警告: symlinkを含む旧control homeを隔離しました: {quarantine}",
+            file=sys.stderr,
+        )
 
     try:
         if args.command == "install":
@@ -659,7 +664,7 @@ def _check_writable(path: Path) -> bool:
     try:
         path.mkdir(parents=True, exist_ok=True)
         test_file = path / ".write_test"
-        test_file.write_text("test")
+        paths.write_private_text(test_file, "test")
         test_file.unlink()
         return True
     except OSError:

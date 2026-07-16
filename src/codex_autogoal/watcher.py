@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import subprocess
 import sys
 import time
@@ -22,7 +21,11 @@ from codex_autogoal.state import (
     now_iso,
 )
 from codex_autogoal.resume import resume_session
-from codex_autogoal.process import get_python_executable, process_fingerprint
+from codex_autogoal.process import (
+    get_python_executable,
+    process_fingerprint,
+    sanitized_environment,
+)
 
 
 # ポーリング間隔（秒）
@@ -45,12 +48,12 @@ def launch_watcher(
     ]
     log_path = paths.watcher_log(config, session_id)
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    env = os.environ.copy()
+    env = sanitized_environment()
     env.update({
         "CODEX_AUTOGOAL_ENABLED": "1",
         "CODEX_AUTOGOAL_HOME": str(config.home),
     })
-    with open(log_path, "a", encoding="utf-8") as log_f:
+    with paths.open_private_append(log_path) as log_f:
         proc = subprocess.Popen(
             watcher_cmd,
             stdin=subprocess.DEVNULL,
@@ -80,6 +83,7 @@ def main() -> None:
     args = parser.parse_args()
 
     config = Config(home=Path(args.home))
+    paths.harden_runtime_permissions(config)
     session_id = paths.validate_identifier(args.session_id, kind="session ID")
     job_id = paths.validate_identifier(args.job_id, kind="job ID")
 
@@ -225,11 +229,9 @@ def _read_job_status(config: Config, job_id: str) -> dict:
 
 
 def _build_resume_message(config: Config, job_id: str, job_status: dict) -> str:
-    """resume時のメッセージを構築する"""
+    """Build a bounded resume notice without exposing control-home paths or logs."""
     status = job_status.get("status", "UNKNOWN")
     exit_code = job_status.get("exit_code", -1)
-    stdout_path = paths.job_stdout_log(config, job_id)
-    stderr_path = paths.job_stderr_log(config, job_id)
 
     return (
         "AutoGoalで待機していたバックグラウンドジョブが完了しました。\n"
@@ -237,12 +239,10 @@ def _build_resume_message(config: Config, job_id: str, job_status: dict) -> str:
         f"job_id: {job_id}\n"
         f"status: {status}\n"
         f"exit_code: {exit_code}\n"
-        f"stdout: {stdout_path}\n"
-        f"stderr: {stderr_path}\n"
         "\n"
-        "ログと生成物を確認してください。\n"
-        "失敗している場合は原因を調査して修正し、元の目的が検証済みで達成されるまで作業を継続してください。\n"
-        "長時間処理が再度必要ならautogoal-jobを使用してください。"
+        "control homeの生ログはモデルへ渡されません。必要ならユーザーへ、信頼済み端末で"
+        "autogoal-job logsを確認するよう依頼してください。\n"
+        "長時間処理が再度必要ならblockedを返し、信頼済み端末からの起動を依頼してください。"
     )
 
 

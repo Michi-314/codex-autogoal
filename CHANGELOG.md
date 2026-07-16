@@ -7,6 +7,16 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-07-16
+
+### Security
+
+- Quarantine the entire legacy control home before use when any symlink is present, including symlinked `state` or `jobs` roots.
+- Replace remaining control-log and doctor writes with no-follow private I/O.
+- Use an environment allowlist for Codex, watcher, and detached jobs by default; require `--inherit-env` for full job inheritance.
+- Remove control-home paths and raw job logs from automatic resume messages.
+- Document that control files remain readable to same-user Codex sandboxes and that detached jobs run outside the Codex sandbox.
+
 ## [0.1.1] - 2026-07-16
 
 ### Security
@@ -33,6 +43,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Path, job identifier, and symlink traversal guards.
 - Unit and fake-Codex integration tests.
 
-[Unreleased]: https://github.com/Michi-314/codex-autogoal/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/Michi-314/codex-autogoal/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/Michi-314/codex-autogoal/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Michi-314/codex-autogoal/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Michi-314/codex-autogoal/releases/tag/v0.1.0

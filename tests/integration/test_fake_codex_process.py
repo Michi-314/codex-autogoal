@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
+from unittest.mock import patch
 
 from codex_autogoal import paths
 from codex_autogoal.config import Config
@@ -21,7 +23,13 @@ def test_exec_uses_codex_thread_id(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_CODEX_THREAD_ID", "fake-thread-process")
     monkeypatch.setenv("FAKE_CODEX_SCENARIO", "simple_done")
 
-    assert run_codex_session(config, "test", cwd=str(tmp_path), model="fake-model") == 0
+    fake_env = {
+        "PATH": os.environ.get("PATH", ""),
+        "FAKE_CODEX_THREAD_ID": "fake-thread-process",
+        "FAKE_CODEX_SCENARIO": "simple_done",
+    }
+    with patch("codex_autogoal.runner.sanitized_environment", return_value=fake_env):
+        assert run_codex_session(config, "test", cwd=str(tmp_path), model="fake-model") == 0
     state = StateManager(paths.session_dir(config, "fake-thread-process")).read()
     assert state is not None
     assert state.session_id == "fake-thread-process"
