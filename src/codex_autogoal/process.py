@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import subprocess
 import sys
 from pathlib import Path
@@ -48,3 +49,20 @@ def spawn_detached(
 def get_python_executable() -> str:
     """現在のPythonインタプリタのパスを返す。"""
     return sys.executable
+
+
+def process_fingerprint(pid: int) -> str | None:
+    """Return a process birth/command fingerprint for PID reuse checks."""
+    try:
+        result = subprocess.run(
+            ["/bin/ps", "-o", "lstart=", "-o", "command=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    value = result.stdout.strip()
+    if result.returncode != 0 or not value:
+        return None
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()

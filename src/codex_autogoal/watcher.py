@@ -23,7 +23,7 @@ from codex_autogoal.state import (
     now_iso,
 )
 from codex_autogoal.resume import resume_session
-from codex_autogoal.process import get_python_executable
+from codex_autogoal.process import get_python_executable, process_fingerprint
 
 
 # ポーリング間隔（秒）
@@ -65,6 +65,7 @@ def launch_watcher(
     state = mgr.read()
     if state:
         state.watcher_pid = proc.pid
+        state.watcher_fingerprint = process_fingerprint(proc.pid)
         mgr.write(state)
     logger.info(f"watcher起動: PID={proc.pid}")
     return proc.pid

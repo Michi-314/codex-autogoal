@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import hashlib
 import os
 import signal
 import subprocess
@@ -16,6 +15,7 @@ from pathlib import Path
 from codex_autogoal.config import Config, load_config
 from codex_autogoal import paths
 from codex_autogoal.duration import parse_duration
+from codex_autogoal.process import process_fingerprint
 
 
 def generate_job_id(name: str | None = None) -> str:
@@ -290,7 +290,7 @@ def _run_command(config: Config, job_id: str, command: list[str], *, cwd: str | 
             _atomic_write(paths.job_process_identity_json(config, job_id), {
                 "pid": proc.pid,
                 "pgid": os.getpgid(proc.pid),
-                "fingerprint": _process_fingerprint(proc.pid),
+                "fingerprint": process_fingerprint(proc.pid),
             })
             exit_code = _wait_with_log_limit(
                 proc,
@@ -412,7 +412,7 @@ def cancel_job(config: Config, job_id: str, *, kill: bool = False) -> bool:
                 pgid = os.getpgid(pid)
                 if pgid != pid or pgid != identity.get("pgid") or pgid == os.getpgrp():
                     return False
-                if _process_fingerprint(pid) != identity.get("fingerprint"):
+                if process_fingerprint(pid) != identity.get("fingerprint"):
                     return False
                 os.killpg(pgid, signal.SIGTERM)
                 # 5秒待ってまだ生きていればSIGKILL
@@ -431,23 +431,6 @@ def cancel_job(config: Config, job_id: str, *, kill: bool = False) -> bool:
                 pass
 
     return True
-
-
-def _process_fingerprint(pid: int) -> str | None:
-    """Return a best-effort process birth/command fingerprint for PID reuse checks."""
-    try:
-        result = subprocess.run(
-            ["/bin/ps", "-o", "lstart=", "-o", "command=", "-p", str(pid)],
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    value = result.stdout.strip()
-    if result.returncode != 0 or not value:
-        return None
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _read_process_identity(config: Config, job_id: str) -> dict | None:

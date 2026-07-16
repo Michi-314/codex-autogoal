@@ -25,6 +25,7 @@ from codex_autogoal.state import (
 from codex_autogoal.runner import build_prompt, run_codex_session
 from codex_autogoal.locking import FileLock, is_lock_stale
 from codex_autogoal.job_runner import get_job_status, is_job_done, cancel_job
+from codex_autogoal.process import process_fingerprint
 
 
 # デフォルトプロトコルテンプレート
@@ -444,8 +445,14 @@ def _cmd_cancel(config: Config, args) -> None:
     # watcherを停止
     if state.watcher_pid:
         try:
-            os.kill(state.watcher_pid, signal.SIGTERM)
-            print(f"watcher (PID {state.watcher_pid}) にSIGTERM送信")
+            if (
+                state.watcher_fingerprint
+                and process_fingerprint(state.watcher_pid) == state.watcher_fingerprint
+            ):
+                os.kill(state.watcher_pid, signal.SIGTERM)
+                print(f"watcher (PID {state.watcher_pid}) にSIGTERM送信")
+            else:
+                print("watcherのprocess identity不一致のため停止を拒否しました")
         except (ProcessLookupError, PermissionError):
             pass
 
