@@ -60,6 +60,16 @@ lock.release()
         assert content == str(os.getpid())
         lock.release()
 
+    def test_hardlinked_lock_is_rejected_without_truncating(self, lock_path, tmp_path):
+        outside = tmp_path / "outside"
+        outside.write_text("must remain unchanged")
+        os.link(outside, lock_path)
+
+        with pytest.raises(ValueError, match="multiple hard links"):
+            FileLock(lock_path).acquire()
+
+        assert outside.read_text() == "must remain unchanged"
+
 
 class TestIsLockStale:
     def test_no_lock_file(self, lock_path):

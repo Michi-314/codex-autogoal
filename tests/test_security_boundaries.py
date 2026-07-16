@@ -86,6 +86,22 @@ def test_harden_quarantines_special_control_node(tmp_path):
     assert config.home.is_dir()
 
 
+def test_harden_quarantines_hardlinked_control_file(tmp_path):
+    config = Config(home=tmp_path / "home")
+    session = config.home / "state" / "session"
+    session.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.write_text("must remain unchanged")
+    os.link(outside, session / "codex.jsonl")
+
+    quarantine = paths.harden_runtime_permissions(config)
+
+    assert quarantine is not None
+    assert outside.read_text() == "must remain unchanged"
+    assert list(config.home.iterdir()) == []
+    assert (quarantine / "state/session/codex.jsonl").stat().st_nlink == 2
+
+
 def test_sanitized_environment_drops_secrets(monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin")
     monkeypatch.setenv("LANG", "C.UTF-8")
@@ -126,6 +142,32 @@ def test_private_write_refuses_final_component_symlink(tmp_path):
         paths.write_private_text(link, "attacker controlled")
 
     assert target.read_text() == "unchanged"
+
+
+@pytest.mark.parametrize("writer", [paths.write_private_text, paths.open_private_write])
+def test_private_write_refuses_hardlinked_file_without_truncating(tmp_path, writer):
+    outside = tmp_path / "outside"
+    outside.write_text("must remain unchanged")
+    control = tmp_path / "control"
+    os.link(outside, control)
+
+    with pytest.raises(ValueError, match="multiple hard links"):
+        result = writer(control, "attacker controlled") if writer is paths.write_private_text else writer(control)
+        if result is not None:
+            result.close()
+
+    assert outside.read_text() == "must remain unchanged"
+
+
+def test_private_read_refuses_hardlinked_file(tmp_path):
+    outside = tmp_path / "outside"
+    outside.write_text("sensitive")
+    outside.chmod(0o600)
+    control = tmp_path / "control"
+    os.link(outside, control)
+
+    with pytest.raises(ValueError, match="multiple hard links"):
+        paths.read_private_text(control)
 
 
 def test_codex_command_never_adds_control_home(tmp_path):

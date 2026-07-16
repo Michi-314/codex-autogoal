@@ -67,7 +67,8 @@ def _runtime_tree_contains_unsafe_node(home: Path) -> bool:
                 continue
         for name in files:
             try:
-                if not stat.S_ISREG((root_path / name).lstat().st_mode):
+                info = (root_path / name).lstat()
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                     return True
             except FileNotFoundError:
                 continue
@@ -153,6 +154,8 @@ def _validate_private_write_fd(fd: int, path: Path) -> None:
         raise ValueError(f"control path is not a regular file: {path}")
     if info.st_uid != os.getuid():
         raise PermissionError(f"control file is not owned by current user: {path}")
+    if info.st_nlink != 1:
+        raise ValueError(f"control file has multiple hard links: {path}")
     os.fchmod(fd, 0o600)
 
 
@@ -163,6 +166,8 @@ def read_private_text(path: Path, *, max_bytes: int = 1_048_576) -> str:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
             raise ValueError(f"control path is not a regular file: {path}")
+        if info.st_nlink != 1:
+            raise ValueError(f"control file has multiple hard links: {path}")
         if info.st_uid != os.getuid() or info.st_mode & 0o077:
             raise PermissionError(f"unsafe control file ownership or mode: {path}")
         if info.st_size > max_bytes:
@@ -192,6 +197,7 @@ def is_private_regular_file(path: Path) -> bool:
     return (
         stat.S_ISREG(info.st_mode)
         and info.st_uid == os.getuid()
+        and info.st_nlink == 1
         and not info.st_mode & 0o077
     )
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fcntl
 import os
+import stat
 from pathlib import Path
 from types import TracebackType
 
@@ -42,11 +43,19 @@ class FileLock:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._fd = os.open(
             str(self.path),
-            os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
+            os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK,
             0o600,
         )
 
         try:
+            info = os.fstat(self._fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError(f"lock path is not a regular file: {self.path}")
+            if info.st_uid != os.getuid():
+                raise PermissionError(f"lock file is not owned by current user: {self.path}")
+            if info.st_nlink != 1:
+                raise ValueError(f"lock file has multiple hard links: {self.path}")
+            os.fchmod(self._fd, 0o600)
             flags = fcntl.LOCK_EX
             if not blocking:
                 flags |= fcntl.LOCK_NB
@@ -57,11 +66,15 @@ class FileLock:
             os.write(self._fd, str(os.getpid()).encode())
             self._locked = True
             return True
-        except OSError:
+        except BlockingIOError:
             # ロック取得失敗（別プロセスが保持中）
             os.close(self._fd)
             self._fd = None
             return False
+        except Exception:
+            os.close(self._fd)
+            self._fd = None
+            raise
 
     def release(self) -> None:
         """ロックを解放する。"""

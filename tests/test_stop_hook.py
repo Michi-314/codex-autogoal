@@ -69,6 +69,21 @@ class TestDisabled:
         result = json.loads(captured.out.strip())
         assert result.get("continue") is True
 
+    def test_disabled_hook_does_not_touch_control_home(self, tmp_path, capsys):
+        config = Config(home=tmp_path / "autogoal", enabled=False)
+        input_json = json.dumps({"session_id": "x", "last_assistant_message": "test"})
+
+        with patch.dict(os.environ, {"CODEX_AUTOGOAL_ENABLED": "0"}), \
+             patch("sys.stdin", io.StringIO(input_json)), \
+             patch("codex_autogoal.hooks.stop.load_config", return_value=config), \
+             patch("codex_autogoal.hooks.stop.paths.harden_runtime_permissions") as harden:
+            stop_hook_main()
+
+        result = json.loads(capsys.readouterr().out.strip())
+        assert result.get("continue") is True
+        harden.assert_not_called()
+        assert not config.home.exists()
+
 
 class TestContinue:
     def test_continue_returns_block(self, config, session_dir, capsys):
