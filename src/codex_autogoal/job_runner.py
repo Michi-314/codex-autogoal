@@ -287,11 +287,19 @@ def _run_command(config: Config, job_id: str, command: list[str], *, cwd: str | 
             )
             # PID更新（実際の子プロセスPID）
             paths.job_pid_file(config, job_id).write_text(str(proc.pid))
-            _atomic_write(paths.job_process_identity_json(config, job_id), {
-                "pid": proc.pid,
-                "pgid": os.getpgid(proc.pid),
-                "fingerprint": process_fingerprint(proc.pid),
-            })
+            try:
+                pgid = os.getpgid(proc.pid)
+                fingerprint = process_fingerprint(proc.pid)
+                if fingerprint:
+                    _atomic_write(paths.job_process_identity_json(config, job_id), {
+                        "pid": proc.pid,
+                        "pgid": pgid,
+                        "fingerprint": fingerprint,
+                    })
+            except ProcessLookupError:
+                # A short-lived command may exit before identity capture. Its result
+                # remains valid, but a later kill request will fail closed.
+                pass
             exit_code = _wait_with_log_limit(
                 proc,
                 stdout_path,
