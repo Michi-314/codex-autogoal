@@ -7,8 +7,8 @@
 
 > [!CAUTION]
 > v0.1.0 must not be used with untrusted content. A trust-boundary flaw allowed the
-> Codex-writable control home to influence unsandboxed hooks and watchers. The unreleased
-> security fix removes all Codex write access to control state and disables terminal resume.
+> Codex-writable control home to influence unsandboxed hooks and watchers. Upgrade to v0.1.1,
+> which removes all Codex write access to control state and disables terminal resume.
 
 AutoGoal is a small, dependency-free supervisor for long-running Codex CLI tasks. It keeps
 ordinary work moving through a Stop hook, moves long commands into detached OS processes,
