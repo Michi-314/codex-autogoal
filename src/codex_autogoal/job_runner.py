@@ -15,6 +15,7 @@ from pathlib import Path
 from codex_autogoal.config import Config, load_config
 from codex_autogoal import paths
 from codex_autogoal.duration import parse_duration
+from codex_autogoal.process import process_fingerprint
 
 
 def generate_job_id(name: str | None = None) -> str:
@@ -243,6 +244,7 @@ def run_job_runner_main() -> None:
     4. 最後にdoneマーカーをatomicに作成
     """
     import argparse
+    paths.secure_umask()
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", required=True, choices=["command", "timer"])
@@ -259,7 +261,7 @@ def run_job_runner_main() -> None:
     command_args = args.command_args + remaining
 
     config = Config(home=Path(args.home))
-    job_id = args.job_id
+    job_id = paths.validate_identifier(args.job_id, kind="job ID")
 
     if args.mode == "timer":
         _run_timer(config, job_id, args.seconds)
@@ -285,7 +287,25 @@ def _run_command(config: Config, job_id: str, command: list[str], *, cwd: str | 
             )
             # PID更新（実際の子プロセスPID）
             paths.job_pid_file(config, job_id).write_text(str(proc.pid))
-            exit_code = proc.wait()
+            try:
+                pgid = os.getpgid(proc.pid)
+                fingerprint = process_fingerprint(proc.pid)
+                if fingerprint:
+                    _atomic_write(paths.job_process_identity_json(config, job_id), {
+                        "pid": proc.pid,
+                        "pgid": pgid,
+                        "fingerprint": fingerprint,
+                    })
+            except ProcessLookupError:
+                # A short-lived command may exit before identity capture. Its result
+                # remains valid, but a later kill request will fail closed.
+                pass
+            exit_code = _wait_with_log_limit(
+                proc,
+                stdout_path,
+                stderr_path,
+                config.max_job_log_bytes,
+            )
     except Exception as e:
         # コマンド実行失敗
         stderr_path.write_text(f"ジョブ実行エラー: {e}\n")
@@ -392,10 +412,15 @@ def cancel_job(config: Config, job_id: str, *, kill: bool = False) -> bool:
         if pid_path.exists():
             try:
                 pid = int(pid_path.read_text().strip())
+                identity = _read_process_identity(config, job_id)
+                if not identity or identity.get("pid") != pid:
+                    return False
                 # 対象コマンド専用のプロセスグループへ送る。job runner
                 # 自身は別グループなので、終了結果を確実にfinalizeできる。
                 pgid = os.getpgid(pid)
-                if pgid == os.getpgrp():
+                if pgid != pid or pgid != identity.get("pgid") or pgid == os.getpgrp():
+                    return False
+                if process_fingerprint(pid) != identity.get("fingerprint"):
                     return False
                 os.killpg(pgid, signal.SIGTERM)
                 # 5秒待ってまだ生きていればSIGKILL
@@ -414,6 +439,46 @@ def cancel_job(config: Config, job_id: str, *, kill: bool = False) -> bool:
                 pass
 
     return True
+
+
+def _read_process_identity(config: Config, job_id: str) -> dict | None:
+    try:
+        data = json.loads(paths.job_process_identity_json(config, job_id).read_text())
+        if not isinstance(data, dict) or not data.get("fingerprint"):
+            return None
+        return data
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _wait_with_log_limit(
+    proc: subprocess.Popen,
+    stdout_path: Path,
+    stderr_path: Path,
+    max_bytes: int,
+) -> int:
+    """Stop a detached job if its retained stdout/stderr exceed the configured cap."""
+    if max_bytes <= 0:
+        raise ValueError("CODEX_AUTOGOAL_MAX_JOB_LOG_BYTES must be positive")
+    while proc.poll() is None:
+        total = sum(
+            path.stat().st_size if path.exists() else 0
+            for path in (stdout_path, stderr_path)
+        )
+        if total > max_bytes:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                proc.wait()
+            with open(stderr_path, "a", encoding="utf-8") as stream:
+                stream.write(
+                    f"\nAutoGoal log limit exceeded: {total} > {max_bytes} bytes\n"
+                )
+            return 125
+        time.sleep(0.1)
+    return int(proc.returncode or 0)
 
 
 def _atomic_write(path: Path, data: dict) -> None:

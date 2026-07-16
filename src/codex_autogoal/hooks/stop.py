@@ -39,6 +39,7 @@ from codex_autogoal.watcher import launch_watcher
 
 def main() -> None:
     """Stop Hookメインエントリポイント"""
+    paths.secure_umask()
     try:
         _run_hook()
     except Exception as e:

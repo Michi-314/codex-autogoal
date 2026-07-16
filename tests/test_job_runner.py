@@ -17,6 +17,7 @@ from codex_autogoal.job_runner import (
     is_job_done,
     cancel_job,
     _finalize_job,
+    _run_command,
 )
 
 
@@ -84,6 +85,19 @@ class TestCreateJob:
         status = get_job_status(config, job_id)
         assert status["status"] == "FAILED"
         assert status["exit_code"] != 0
+
+    def test_short_lived_job_survives_identity_capture_race(self, config, monkeypatch):
+        job_id = generate_job_id("identity-race")
+        paths.job_dir(config, job_id).mkdir(parents=True)
+        paths.job_started_at_file(config, job_id).write_text("now")
+        monkeypatch.setattr(
+            "codex_autogoal.job_runner.os.getpgid",
+            lambda _pid: (_ for _ in ()).throw(ProcessLookupError()),
+        )
+
+        _run_command(config, job_id, ["true"])
+
+        assert get_job_status(config, job_id)["status"] == "SUCCEEDED"
 
 
 class TestFinalizeJob:

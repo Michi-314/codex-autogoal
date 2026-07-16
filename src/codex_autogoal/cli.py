@@ -25,6 +25,7 @@ from codex_autogoal.state import (
 from codex_autogoal.runner import build_prompt, run_codex_session
 from codex_autogoal.locking import FileLock, is_lock_stale
 from codex_autogoal.job_runner import get_job_status, is_job_done, cancel_job
+from codex_autogoal.process import process_fingerprint
 
 
 # デフォルトプロトコルテンプレート
@@ -70,6 +71,7 @@ doneを返す前に以下を確認すること:
 
 
 def main() -> None:
+    paths.secure_umask()
     parser = argparse.ArgumentParser(
         prog="autogoal",
         description="Codex AutoGoal Supervisor",
@@ -124,6 +126,7 @@ def main() -> None:
 
     args = parser.parse_args()
     config = load_config()
+    paths.harden_runtime_permissions(config)
 
     try:
         if args.command == "install":
@@ -142,6 +145,9 @@ def main() -> None:
             _cmd_recover(config)
         elif args.command == "doctor":
             _cmd_doctor(config)
+    except ValueError as exc:
+        print(f"エラー: {exc}", file=sys.stderr)
+        sys.exit(2)
     except KeyboardInterrupt:
         print("\n中断されました", file=sys.stderr)
         sys.exit(130)
@@ -211,13 +217,14 @@ statusMessage = "Checking AutoGoal command policy"
     config_path.write_text(combined)
 
     # プロトコルテンプレート保存
-    config.home.mkdir(parents=True, exist_ok=True)
+    paths.ensure_private_dir(config.home)
     protocol_path = paths.protocol_file(config)
     protocol_path.write_text(_DEFAULT_PROTOCOL)
 
     # ディレクトリ作成
-    paths.state_dir(config).mkdir(parents=True, exist_ok=True)
-    paths.jobs_dir(config).mkdir(parents=True, exist_ok=True)
+    paths.ensure_private_dir(paths.state_dir(config))
+    paths.ensure_private_dir(paths.jobs_dir(config))
+    paths.harden_runtime_permissions(config)
 
     print(f"✓ Hook設定を追加しました: {config_path}")
     print(f"✓ プロトコルテンプレートを保存しました: {protocol_path}")
@@ -438,8 +445,14 @@ def _cmd_cancel(config: Config, args) -> None:
     # watcherを停止
     if state.watcher_pid:
         try:
-            os.kill(state.watcher_pid, signal.SIGTERM)
-            print(f"watcher (PID {state.watcher_pid}) にSIGTERM送信")
+            if (
+                state.watcher_fingerprint
+                and process_fingerprint(state.watcher_pid) == state.watcher_fingerprint
+            ):
+                os.kill(state.watcher_pid, signal.SIGTERM)
+                print(f"watcher (PID {state.watcher_pid}) にSIGTERM送信")
+            else:
+                print("watcherのprocess identity不一致のため停止を拒否しました")
         except (ProcessLookupError, PermissionError):
             pass
 

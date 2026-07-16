@@ -7,6 +7,14 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- Reject invalid session and job identifiers at every filesystem boundary.
+- Store runtime state and logs with user-only permissions and migrate existing state.
+- Verify WezTerm foreground process before visible resume and send a sanitized one-line message.
+- Verify process identity before killing a detached job and enforce a configurable job-log limit.
+- Pin CI actions by commit SHA and add CodeQL scanning.
+
 ## [0.1.0] - 2026-07-15
 
 ### Added

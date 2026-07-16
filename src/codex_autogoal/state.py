@@ -112,6 +112,7 @@ class SessionState:
     recent_reasons: list[str] = field(default_factory=list)
     token_usage: TokenUsage = field(default_factory=TokenUsage)
     watcher_pid: int | None = None
+    watcher_fingerprint: str | None = None
     codex_pid: int | None = None
     sandbox_mode: str = "workspace-write"
     prompt_file: str | None = None
@@ -149,6 +150,7 @@ class SessionState:
             reasoning_output_tokens=usage_data.get("reasoning_output_tokens", 0),
         )
         state.watcher_pid = data.get("watcher_pid")
+        state.watcher_fingerprint = data.get("watcher_fingerprint")
         state.codex_pid = data.get("codex_pid")
         state.sandbox_mode = data.get("sandbox_mode", "workspace-write")
         state.prompt_file = data.get("prompt_file")
